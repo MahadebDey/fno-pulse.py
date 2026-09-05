@@ -2,24 +2,45 @@ import streamlit as st
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
+import numpy as np
+import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 
-# ================= Page Configuration =================
+# ================= 1. Page Configuration & Custom CSS =================
 st.set_page_config(
     page_title="Mahadeb Stock Research",
-    page_icon="📈",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-st.title("📈 Mahadeb Stock Research")
-st.caption("Automated F&O Market Scanner: Earnings Verdicts, High-Impact News, TV Research & Brokerage Targets")
+# Custom Mobile-Friendly Styling
+st.markdown("""
+<style>
+    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
+    .metric-card {
+        background-color: #1E222D;
+        border: 1px solid #2A2E39;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+    }
+    div[data-testid="stExpander"] {
+        border: 1px solid #2A2E39 !important;
+        border-radius: 8px !important;
+        margin-bottom: 12px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("⚡ Mahadeb Stock Research")
+st.caption("Institutional Intelligence: Technical Radar (VWAP, PDH/PDL, 52W), Results, TV Picks & Brokerage Targets")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ================= 1. F&O Stocks & Sector Mapping =================
+# ================= 2. F&O Universe & Sector Mapping =================
 STOCK_SECTOR_MAP = {
-    # Banking & Financial Services
+    # Banking & Financials
     "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking",
     "KOTAKBANK": "Banking", "INDUSINDBK": "Banking", "BANKBARODA": "Banking", "PNB": "Banking",
     "BAJFINANCE": "Financials", "BAJAJFINSV": "Financials", "CHOLAFIN": "Financials", "MUTHOOTFIN": "Financials",
@@ -50,54 +71,99 @@ STOCK_SECTOR_MAP = {
     "ITC": "FMCG", "HINDUNILVR": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", 
     "DABUR": "FMCG", "TATACONSUM": "FMCG", "TITAN": "Consumer", "ASIANPAINT": "Consumer",
     
-    # Infrastructure, Cement & Cables
+    # Infra & Cables
     "LT": "Infra", "ULTRACEMCO": "Cement", "GRASIM": "Cement", "AMBUJACEM": "Cement", 
     "POLYCAB": "Cables", "HAVELLS": "Consumer Elec", "DIXON": "Electronics", "DLF": "Realty"
 }
 
 ALL_FNO_STOCKS = sorted(list(STOCK_SECTOR_MAP.keys()))
 
-# ================= 2. Intelligence & Sentiment Engines =================
+# ================= 3. Technical Analytics Engine (VWAP + Breakouts) =================
+def compute_stock_technicals(symbol):
+    ticker = f"{symbol}.NS"
+    try:
+        # Daily candle data for PDH, PDL, 52W High/Low and 20 EMA
+        daily = yf.download(ticker, period="1y", interval="1d", progress=False)
+        if isinstance(daily.columns, pd.MultiIndex):
+            daily.columns = daily.columns.get_level_values(0)
+            
+        if len(daily) < 30:
+            return None
+
+        cmp_val = round(float(daily['Close'].iloc[-1]), 2)
+        pdh = round(float(daily['High'].iloc[-2]), 2)
+        pdl = round(float(daily['Low'].iloc[-2]), 2)
+        high_52w = round(float(daily['High'].max()), 2)
+        low_52w = round(float(daily['Low'].min()), 2)
+        ema20 = round(float(daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
+
+        # 5-minute candle data for VWAP calculation
+        intra = yf.download(ticker, period="1d", interval="5m", progress=False)
+        if isinstance(intra.columns, pd.MultiIndex):
+            intra.columns = intra.columns.get_level_values(0)
+
+        if not intra.empty and 'Volume' in intra and intra['Volume'].sum() > 0:
+            typical_price = (intra['High'] + intra['Low'] + intra['Close']) / 3
+            vwap_val = round(float((typical_price * intra['Volume']).sum() / intra['Volume'].sum()), 2)
+            vwap_alert = "🟢 Above VWAP" if cmp_val >= vwap_val else "🔴 Below VWAP"
+        else:
+            vwap_val = cmp_val
+            vwap_alert = "⚪ At VWAP"
+
+        # PDH / PDL Breakout check
+        if cmp_val > pdh:
+            pd_alert = "🟢 PDH Breakout"
+        elif cmp_val < pdl:
+            pd_alert = "🔴 PDL Breakdown"
+        else:
+            pd_alert = "⚪ Inside Range"
+
+        # 52-Week Range Proximity (within 2.5%)
+        pct_52h = ((high_52w - cmp_val) / high_52w) * 100
+        pct_52l = ((cmp_val - low_52w) / low_52w) * 100
+        if pct_52h <= 2.5:
+            high_low_flag = f"🚀 Near 52W High ({high_52w})"
+        elif pct_52l <= 2.5:
+            high_low_flag = f"⚠️ Near 52W Low ({low_52w})"
+        else:
+            high_low_flag = "Normal Range"
+
+        # Trend bias relative to 20 EMA
+        trend_status = "🟢 Bullish (> 20 EMA)" if cmp_val >= ema20 else "🔴 Bearish (< 20 EMA)"
+
+        return {
+            "Stock": symbol,
+            "Sector": STOCK_SECTOR_MAP.get(symbol, "General"),
+            "CMP (₹)": cmp_val,
+            "VWAP (₹)": vwap_val,
+            "VWAP Alert": vwap_alert,
+            "PDH/PDL": pd_alert,
+            "52W Status": high_low_flag,
+            "20 EMA Trend": trend_status,
+            "PDH (₹)": pdh,
+            "PDL (₹)": pdl
+        }
+    except Exception:
+        return None
+
+# ================= 4. News & Sentiment Parsers =================
 def analyze_earnings_verdict(text):
     t = text.lower()
-    bull_keys = [
-        "profit jumps", "pat rises", "net profit up", "beats estimates", "beat estimates", 
-        "revenue up", "margin expands", "dividend declared", "strong q", "robust growth", 
-        "ebitda jumps", "guidance raised", "profit surges", "quarterly net rises"
-    ]
-    bear_keys = [
-        "profit falls", "pat drops", "net loss", "misses estimates", "miss estimates", 
-        "margin drops", "ebitda falls", "slumps", "plunges", "weak q", "guidance cut", 
-        "revenue declines", "net profit drops"
-    ]
-    
-    is_bull = any(k in t for k in bull_keys)
-    is_bear = any(k in t for k in bear_keys)
-    
-    if is_bull and not is_bear:
-        return "🟢 BULLISH RESULT", "Beat Estimates / Strong Profit Growth"
-    elif is_bear and not is_bull:
-        return "🔴 BEARISH RESULT", "Missed Estimates / Margin Compression / Loss"
-    return "⚪ IN-LINE / NEUTRAL", "Earnings Announcement / Inline Performance"
+    bull_keys = ["profit jumps", "pat rises", "net profit up", "beats estimates", "beat estimates", "revenue up", "margin expands", "profit surges"]
+    bear_keys = ["profit falls", "pat drops", "net loss", "misses estimates", "miss estimates", "margin drops", "revenue declines"]
+    if any(k in t for k in bull_keys): return "🟢 BULLISH RESULT", "Beat Estimates / Profit Surge"
+    if any(k in t for k in bear_keys): return "🔴 BEARISH RESULT", "Missed Estimates / Margin Drag"
+    return "⚪ IN-LINE / GENERAL", "Financial Announcement"
 
 def analyze_news_impact(text):
     t = text.lower()
-    pos_keys = [
-        "bags order", "wins contract", "approval", "acquires", "upgrade", "joint venture", 
-        "expansion", "commissioned", "target raised", "surges", "green signal", "secures"
-    ]
-    neg_keys = [
-        "penalty", "probe", "raid", "sebi notice", "usfda oai", "warning letter", 
-        "fire", "strike", "resigns", "downgrade", "fraud", "scam", "tax notice", "inquiry"
-    ]
-    
-    if any(k in t for k in pos_keys):
-        return "🟢 POSITIVE IMPACT", 1
-    elif any(k in t for k in neg_keys):
-        return "🔴 NEGATIVE IMPACT", -1
-    return "⚪ NEUTRAL / GENERAL", 0
+    pos_keys = ["bags order", "wins contract", "approval", "acquires", "upgrade", "joint venture", "expansion", "target raised"]
+    neg_keys = ["penalty", "probe", "raid", "sebi notice", "usfda oai", "warning letter", "fire", "resigns", "downgrade"]
+    if any(k in t for k in pos_keys): return "🟢 POSITIVE IMPACT"
+    if any(k in t for k in neg_keys): return "🔴 NEGATIVE IMPACT"
+    return "⚪ GENERAL HEADLINE"
 
-def fetch_rss_feed(query, limit=15):
+def fetch_rss_feed(query, limit=12):
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     results = []
     try:
@@ -109,215 +175,137 @@ def fetch_rss_feed(query, limit=15):
                 link = entry.find("link").text
                 date = entry.find("pubDate").text
                 
-                matched_stock = "MARKET"
+                matched = "MARKET"
                 for stk in ALL_FNO_STOCKS:
                     if stk.lower() in title.lower():
-                        matched_stock = stk
+                        matched = stk
                         break
-                
-                results.append({
-                    "stock": matched_stock,
-                    "title": title,
-                    "link": link,
-                    "date": date
-                })
+                results.append({"stock": matched, "title": title, "link": link, "date": date})
     except Exception:
         pass
     return results
 
-def fetch_stock_specific(stock, context_type):
-    if context_type == "tv":
-        query = f"{stock}+share+(Zee+Business+OR+CNBC+Awaaz+OR+Anil+Singhvi+OR+target)"
-    elif context_type == "brokerage":
-        query = f"{stock}+share+target+price+OR+{stock}+brokerage+rating"
-    elif context_type == "results":
-        query = f"{stock}+quarterly+results+OR+{stock}+pat+OR+{stock}+net+profit+OR+{stock}+earnings"
-    elif context_type == "impact_news":
-        query = f"{stock}+order+OR+{stock}+sebi+OR+{stock}+usfda+OR+{stock}+penalty+OR+{stock}+approval"
-    else:
-        query = f"{stock}+share+India"
-    return fetch_rss_feed(query, limit=6)
+# ================= 5. TOP-TO-BOTTOM SERIAL INTERFACE =================
 
-# ================= 3. UI Tabs =================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Earnings Verdict",
-    "⚡ High-Impact News",
-    "📺 TV Research Calls",
-    "🎯 Brokerage Targets", 
-    "🚀 Sector & Market Pulse", 
-    "🐦 Twitter / X Pulse"
-])
-
-# ================= TAB 1: Earnings Verdict =================
-with tab1:
-    st.subheader("📊 Corporate Results: Bullish vs. Bearish Verdict")
-    st.caption("Automated financial results scanner evaluating profitability, revenue, and analyst estimates:")
+# SECTION 1: Technical & Intraday VWAP Radar
+with st.expander("🎯 SECTION 1: Technical & Intraday VWAP Radar", expanded=True):
+    st.write("**Scan stocks across VWAP, PDH/PDL breakouts, 52-Week highs/lows, and 20-EMA trends.**")
+    scan_vol = st.slider("Select F&O universe volume for analysis:", min_value=10, max_value=len(ALL_FNO_STOCKS), value=20, step=5)
     
-    if st.button("🔄 Auto-Scan Latest Results & Verdicts", use_container_width=True, key="btn_res_verdict"):
-        with st.spinner("Analyzing recent earnings reports..."):
-            res_items = fetch_rss_feed("quarterly+results+(profit+OR+loss+OR+pat+OR+revenue)+share+India", limit=25)
-            if res_items:
-                for item in res_items:
-                    verdict, desc = analyze_earnings_verdict(item["title"])
-                    st.markdown(f"**[{verdict}]** `{item['stock']}` — *{desc}*")
-                    st.markdown(f"[{item['title']}]({item['link']})")
-                    st.caption(f"Published: {item['date']}")
+    if st.button("🚀 Run Real-Time Technical Scanner", use_container_width=True, key="btn_run_tech"):
+        with st.spinner(f"Computing VWAP & Breakouts for top {scan_vol} stocks..."):
+            stock_sublist = ALL_FNO_STOCKS[:scan_vol]
+            data_pile = []
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                scanned_items = executor.map(compute_stock_technicals, stock_sublist)
+                for item in scanned_items:
+                    if item:
+                        data_pile.append(item)
+
+            if data_pile:
+                tdf = pd.DataFrame(data_pile)
+                
+                # Highlight Metrics
+                above_vwap = tdf[tdf['VWAP Alert'] == "🟢 Above VWAP"]
+                pdh_break = tdf[tdf['PDH/PDL'] == "🟢 PDH Breakout"]
+                pdl_break = tdf[tdf['PDH/PDL'] == "🔴 PDL Breakdown"]
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Above VWAP", f"{len(above_vwap)} / {len(tdf)}")
+                c2.metric("PDH Breakouts", len(pdh_break))
+                c3.metric("PDL Breakdowns", len(pdl_break))
+
+                st.write("---")
+                st.dataframe(
+                    tdf[["Stock", "Sector", "CMP (₹)", "VWAP (₹)", "VWAP Alert", "PDH/PDL", "52W Status", "20 EMA Trend"]], 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                st.warning("Could not fetch candle data. Please try again.")
+
+# SECTION 2: Earnings Verdicts
+with st.expander("📊 SECTION 2: Corporate Results & Earnings Verdicts", expanded=False):
+    st.write("**Automated earnings intelligence assessing quarterly results against market benchmarks.**")
+    if st.button("🔄 Fetch Latest Quarterly Results", use_container_width=True, key="btn_res"):
+        with st.spinner("Analyzing corporate result filings..."):
+            res_list = fetch_rss_feed("quarterly+results+(profit+OR+loss+OR+pat+OR+revenue)+share+India", limit=15)
+            if res_list:
+                for r in res_list:
+                    verdict, desc = analyze_earnings_verdict(r['title'])
+                    st.markdown(f"**[{verdict}]** `{r['stock']}` — *{desc}*")
+                    st.markdown(f"[{r['title']}]({r['link']})")
+                    st.caption(f"Filed: {r['date']}")
                     st.divider()
             else:
-                st.info("No recent corporate earnings updates found.")
+                st.info("No earnings announcements detected.")
 
-    st.write("---")
-    st.subheader("🔍 Look Up Specific Stock Results")
-    target_res_stk = st.selectbox("Select F&O Stock:", ALL_FNO_STOCKS, key="box_res_stk")
-    if st.button(f"Analyze Results for {target_res_stk}", use_container_width=True):
-        single_res = fetch_stock_specific(target_res_stk, "results")
-        if single_res:
-            for sr in single_res:
-                v, d = analyze_earnings_verdict(sr["title"])
-                st.markdown(f"**[{v}]** [{sr['title']}]({sr['link']})")
-                st.caption(f"Date: {sr['date']}")
-        else:
-            st.info(f"No recent quarterly announcements found for {target_res_stk}.")
-
-# ================= TAB 2: High-Impact News =================
-with tab2:
-    st.subheader("⚡ High-Impact Market Movers")
-    st.caption("Real-time scan for SEBI orders, contract wins, USFDA observations, and management changes:")
-    
-    if st.button("🔄 Load All Market-Moving Headlines", use_container_width=True, key="btn_impact_news"):
-        with st.spinner("Filtering high-impact events..."):
-            news_items = fetch_rss_feed("(order+win+OR+penalty+OR+sebi+OR+usfda+OR+acquisition+OR+resigns)+share+India", limit=25)
-            if news_items:
-                for n in news_items:
-                    impact_tag, _ = analyze_news_impact(n["title"])
-                    st.markdown(f"**[{impact_tag}]** `{n['stock']}` | [{n['title']}]({n['link']})")
+# SECTION 3: High-Impact News
+with st.expander("⚡ SECTION 3: High-Impact Breaking News", expanded=False):
+    st.write("**Material corporate developments: SEBI actions, major orders, acquisitions, and regulatory audits.**")
+    if st.button("🔄 Pull High-Impact Market Movers", use_container_width=True, key="btn_impact"):
+        with st.spinner("Scanning material headlines..."):
+            news_list = fetch_rss_feed("(order+win+OR+penalty+OR+sebi+OR+usfda+OR+acquisition)+share+India", limit=15)
+            if news_list:
+                for n in news_list:
+                    tag = analyze_news_impact(n['title'])
+                    st.markdown(f"**[{tag}]** `{n['stock']}` | [{n['title']}]({n['link']})")
                     st.caption(f"Time: {n['date']}")
                     st.divider()
             else:
-                st.info("No critical corporate action headlines detected.")
+                st.info("No material corporate alerts found.")
 
-    st.write("---")
-    st.subheader("🔍 Search Stock-Specific Critical News")
-    target_n_stk = st.selectbox("Select F&O Stock:", ALL_FNO_STOCKS, key="box_news_stk")
-    if st.button(f"Fetch Breaking News for {target_n_stk}", use_container_width=True):
-        single_n = fetch_stock_specific(target_n_stk, "impact_news")
-        if single_n:
-            for sn in single_n:
-                tag, _ = analyze_news_impact(sn["title"])
-                st.markdown(f"**[{tag}]** [{sn['title']}]({sn['link']})")
-                st.caption(f"Date: {sn['date']}")
-        else:
-            st.info(f"No critical headlines found for {target_n_stk}.")
-
-# ================= TAB 3: Zee Business & CNBC Awaaz =================
-with tab3:
-    st.subheader("📺 Business TV Recommendations (Automated Feed)")
-    st.caption("Live panelist picks and segment highlights from Zee Business and CNBC Awaaz:")
-    
-    if st.button("🔄 Auto-Scan TV Calls", use_container_width=True, key="btn_tv_auto"):
-        with st.spinner("Aggregating TV broadcast research..."):
-            auto_tv = fetch_rss_feed("share+(Zee+Business+OR+CNBC+Awaaz+OR+Anil+Singhvi)+stock+buy+sell", limit=20)
-            if auto_tv:
-                for item in auto_tv:
-                    ch_tag = "🟢 Zee Business" if "zee" in item["title"].lower() else ("🔵 CNBC Awaaz" if "cnbc" in item["title"].lower() or "awaaz" in item["title"].lower() else "📺 Business TV")
-                    st.markdown(f"**[{ch_tag}]** `{item['stock']}` | [{item['title']}]({item['link']})")
-                    st.caption(f"Time: {item['date']}")
+# SECTION 4: Business TV Research
+with st.expander("📺 SECTION 4: Zee Business & CNBC Awaaz Research", expanded=False):
+    st.write("**TV panelist recommendations, trading ideas, and stock calls from leading business channels.**")
+    if st.button("🔄 Scan TV Research Feeds", use_container_width=True, key="btn_tv"):
+        with st.spinner("Parsing television research alerts..."):
+            tv_list = fetch_rss_feed("share+(Zee+Business+OR+CNBC+Awaaz+OR+Anil+Singhvi)+stock+buy+sell", limit=15)
+            if tv_list:
+                for t in tv_list:
+                    src = "🟢 Zee Business" if "zee" in t['title'].lower() else ("🔵 CNBC Awaaz" if "cnbc" in t['title'].lower() else "📺 Business TV")
+                    st.markdown(f"**[{src}]** `{t['stock']}` | [{t['title']}]({t['link']})")
+                    st.caption(f"Broadcast Time: {t['date']}")
                     st.divider()
             else:
-                st.info("No recent TV recommendations found.")
+                st.info("No recent TV calls detected.")
 
-    st.write("---")
-    st.subheader("🔍 Search TV History by Stock")
-    single_tv_stock = st.selectbox("Select F&O Stock:", ALL_FNO_STOCKS, key="box_tv_single")
-    if st.button(f"Fetch TV Research for {single_tv_stock}", use_container_width=True):
-        res = fetch_stock_specific(single_tv_stock, "tv")
-        if res:
-            for r in res:
-                st.markdown(f"• [{r['title']}]({r['link']})")
-                st.caption(f"Date: {r['date']}")
-        else:
-            st.info(f"No specific TV channel coverage found for {single_tv_stock}.")
-
-# ================= TAB 4: Brokerage Targets =================
-with tab4:
-    st.subheader("🎯 Institutional Brokerage Ratings & Targets")
-    st.caption("Upgrades, downgrades, and price targets from Morgan Stanley, Jefferies, CLSA, and domestic houses:")
-    
-    if st.button("🔄 Auto-Scan Brokerage Targets", use_container_width=True, key="btn_brok_auto"):
-        with st.spinner("Processing analyst target changes..."):
-            auto_brok = fetch_rss_feed("brokerage+target+price+raised+OR+downgrade+share+India", limit=20)
-            if auto_brok:
-                for b in auto_brok:
-                    t_low = b["title"].lower()
-                    call = "🟢 BUY / TARGET UP" if any(w in t_low for w in ["buy", "raised", "upgrade", "bullish", "overweight"]) else ("🔴 SELL / TARGET CUT" if any(w in t_low for w in ["sell", "cut", "downgrade", "bearish", "underweight"]) else "⚪ TARGET UPDATE")
+# SECTION 5: Institutional Brokerage Targets
+with st.expander("🎯 SECTION 5: Brokerage Ratings & Target Upgrades", expanded=False):
+    st.write("**Target revisions and ratings from Morgan Stanley, Jefferies, CLSA, and domestic brokerages.**")
+    if st.button("🔄 Pull Brokerage Target Changes", use_container_width=True, key="btn_brok"):
+        with st.spinner("Retrieving broker reports..."):
+            brok_list = fetch_rss_feed("brokerage+target+price+raised+OR+downgrade+share+India", limit=15)
+            if brok_list:
+                for b in brok_list:
+                    t_low = b['title'].lower()
+                    call = "🟢 BUY / TARGET UP" if any(w in t_low for w in ["buy", "raised", "upgrade"]) else ("🔴 SELL / TARGET CUT" if any(w in t_low for w in ["sell", "cut", "downgrade"]) else "⚪ TARGET REVISED")
                     st.markdown(f"**[{call}]** `{b['stock']}` | [{b['title']}]({b['link']})")
-                    st.caption(f"Time: {b['date']}")
+                    st.caption(f"Release: {b['date']}")
                     st.divider()
             else:
-                st.info("No analyst target updates detected.")
+                st.info("No recent brokerage updates identified.")
 
-    st.write("---")
-    st.subheader("🔍 Look Up Brokerage Targets for a Stock")
-    single_brok_stock = st.selectbox("Select F&O Stock:", ALL_FNO_STOCKS, key="box_brok_single")
-    if st.button(f"Check Targets for {single_brok_stock}", use_container_width=True):
-        res = fetch_stock_specific(single_brok_stock, "brokerage")
-        if res:
-            for r in res:
-                st.markdown(f"• [{r['title']}]({r['link']})")
-                st.caption(f"Date: {r['date']}")
-        else:
-            st.info(f"No active brokerage targets found for {single_brok_stock}.")
-
-# ================= TAB 5: Sector & Market Pulse =================
-with tab5:
-    st.subheader("🌐 Sector Strength & Sentiment Scanner")
-    if st.button("📊 Scan Sector Sentiment & Top F&O Movers", use_container_width=True, key="btn_mkt_scan"):
-        with st.spinner("Scanning 35 key F&O stocks across sectors..."):
-            all_data = []
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                results = executor.map(lambda s: fetch_stock_specific(s, "general"), ALL_FNO_STOCKS[:35])
-                for r_list in results:
-                    all_data.extend(r_list)
-
-            if all_data:
-                df = pd.DataFrame(all_data)
-                df["sector"] = df["stock"].map(STOCK_SECTOR_MAP).fillna("Other")
-                
-                def quick_score(t):
-                    tl = t.lower()
-                    if any(w in tl for w in ["surge", "gain", "profit", "jump", "rally", "buy", "up"]): return 1
-                    if any(w in tl for w in ["fall", "crash", "loss", "drop", "down", "sell"]): return -1
-                    return 0
-                df["score"] = df["title"].apply(quick_score)
-
-                # Sector Overview
-                sec_df = df.groupby("sector")["score"].sum().reset_index().sort_values(by="score", ascending=False)
-                sec_df["Trend"] = sec_df["score"].apply(lambda s: "🟢 Strong" if s > 0 else ("🔴 Weak" if s < 0 else "⚪ Neutral"))
-                
-                st.write("### 🏢 Sector Sentiment Breakdown")
-                st.dataframe(sec_df.rename(columns={"sector": "Sector", "score": "Net Score"}), use_container_width=True, hide_index=True)
-
-                st.divider()
-
-                # Stock Movers
-                stk_df = df.groupby(["stock", "sector"])["score"].sum().reset_index().sort_values(by="score", ascending=False)
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.success("🟢 **Top Bullish Stocks**")
-                    st.dataframe(stk_df[stk_df["score"] > 0].head(8).rename(columns={"stock": "Stock", "sector": "Sector", "score": "Score"}), use_container_width=True, hide_index=True)
-                with c2:
-                    st.error("🔴 **Top Bearish Stocks**")
-                    st.dataframe(stk_df[stk_df["score"] < 0].tail(8).rename(columns={"stock": "Stock", "sector": "Sector", "score": "Score"}), use_container_width=True, hide_index=True)
-
-# ================= TAB 6: Twitter / X Pulse =================
-with tab6:
-    st.subheader("🐦 Social Media Breakout Buzz (X / Twitter)")
-    if st.button("🔄 Auto-Scan Breakout Buzz", use_container_width=True, key="btn_tw_auto"):
-        with st.spinner("Tracking community chatter and momentum calls..."):
-            auto_tw = fetch_rss_feed("stock+breakout+OR+multibagger+twitter+India", limit=15)
-            if auto_tw:
-                for tw in auto_tw:
-                    st.markdown(f"• `{tw['stock']}` | [{tw['title']}]({tw['link']})")
-                    st.divider()
+# SECTION 6: Single Stock Dedicated Lookup
+with st.expander("🔍 SECTION 6: Single Stock Deep-Dive", expanded=False):
+    target_symbol = st.selectbox("Select any F&O stock for complete intel:", ALL_FNO_STOCKS)
+    if st.button(f"Generate Deep-Dive for {target_symbol}", use_container_width=True):
+        with st.spinner(f"Compiling complete file for {target_symbol}..."):
+            # Compute technicals
+            tech_info = compute_stock_technicals(target_symbol)
+            if tech_info:
+                st.write("#### 📈 Technical Pulse")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("CMP", f"₹{tech_info['CMP (₹)']}")
+                m2.metric("VWAP", f"₹{tech_info['VWAP (₹)']}", delta=tech_info['VWAP Alert'])
+                m3.metric("PDH / PDL", tech_info['PDH/PDL'])
+                st.caption(f"Sector: {tech_info['Sector']} | 52W Proximity: {tech_info['52W Status']} | Trend: {tech_info['20 EMA Trend']}")
+            
+            st.write("#### 📰 Recent Headlines & Research")
+            custom_feed = fetch_rss_feed(f"{target_symbol}+share+India", limit=5)
+            if custom_feed:
+                for item in custom_feed:
+                    st.markdown(f"• [{item['title']}]({item['link']})")
+                    st.caption(f"Time: {item['date']}")
             else:
-                st.info("No trending breakout chatter identified.")
+                st.info("No direct news items detected.")
