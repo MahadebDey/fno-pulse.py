@@ -12,43 +12,55 @@ st.set_page_config(
 )
 
 st.title("⚡ F&O Master 360")
-st.caption("F&O स्टॉक्स: टीवी चैनल रिसर्च (Zee Business / CNBC Awaaz), सेंटिमेंट, Twitter व अर्निंग्स")
+st.caption("इंडेक्स, सेक्टोरल सेंटिमेंट, F&O स्टॉक्स, ब्रोकरेज टारगेट्स व टीवी रिसर्च")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ================= 180+ F&O स्टॉक्स की सूची =================
-ALL_FNO_STOCKS = sorted([
-    "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIPORTS",
-    "ALKEM", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY", "ASIANPAINT", "ASTRAL",
-    "ATUL", "AUBANK", "AUROPHARMA", "AXISBANK", "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE",
-    "BALKRISIND", "BALRAMCHIN", "BANDHANBNK", "BANKBARODA", "BATAINDIA", "BEL", "BERGEPAINT",
-    "BHARATFORG", "BHARTIARTL", "BHEL", "BIOCON", "BOSCHLTD", "BPCL", "BRITANNIA", "BSOFT",
-    "CANBK", "CANFINHOME", "CHAMBLFERT", "CHOLAFIN", "CIPLA", "COALINDIA", "COFORGE", "COLPAL",
-    "CONCOR", "COROMANDEL", "CROMPTON", "CUB", "CUMMINSIND", "DABUR", "DALBHARAT", "DEEPAKNTR",
-    "DELHIVERY", "DIVISLAB", "DIXON", "DLF", "DRREDDY", "EICHERMOT", "ESCORTS", "EXIDEIND",
-    "FEDERALBNK", "GAIL", "GLENMARK", "GMRINFRA", "GNFC", "GODREJCP", "GODREJPROP", "GRANULES",
-    "GRASIM", "GUJGASLTD", "HAL", "HAVELLS", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
-    "HEROMOTOCO", "HINDALCO", "HINDCOPPER", "HINDPETRO", "HINDUNILVR", "ICICIBANK", "ICICIGI",
-    "ICICIPRULI", "IDEA", "IDFCFIRSTB", "IEX", "IGL", "INDHOTEL", "INDIACEM", "INDIAMART",
-    "INDIGO", "INDUSINDBK", "INDUSTOWER", "INFY", "IOC", "IPCALAB", "IRCTC", "ITC", "JINDALSTEL",
-    "JKCEMENT", "JSWSTEEL", "JUBLFOOD", "KOTAKBANK", "LALPATHLAB", "LAURUSLABS", "LICHSGFIN",
-    "LT", "LTIM", "LTTS", "LUPIN", "M&M", "M&MFIN", "MANAPPURAM", "MARICO", "MARUTI",
-    "MCX", "METROPOLIS", "MFSL", "MGL", "MOTHERSON", "MOTILALOFS", "MPHASIS", "MRF",
-    "MUTHOOTFIN", "NATIONALUM", "NAUKRI", "NAVINFLUOR", "NESTLEIND", "NMDC", "NTPC",
-    "OBEROIRLTY", "OFSS", "ONGC", "PAGEIND", "PAYTM", "PEL", "PERSISTENT", "PETRONET",
-    "PFC", "PIDILITIND", "PIIND", "PNB", "POLYCAB", "POONAWALLA", "POWERGRID", "PVRINOX",
-    "RAMCOCEM", "RBLBANK", "RECLTD", "RELIANCE", "SAIL", "SBICARD", "SBILIFE", "SBIN",
-    "SHREECEM", "SHRIRAMFIN", "SIEMENS", "SRF", "SUNPHARMA", "SUNTV", "SYNGENE", "TATACHEM",
-    "TATACOMM", "TATACONSUM", "TATAMOTORS", "TATAPOWER", "TATASTEEL", "TCS", "TECHM",
-    "TITAN", "TORNTPHARM", "TORNTPOWER", "TRENT", "TVSMOTOR", "UBL", "ULTRACEMCO",
-    "UPL", "VEDL", "VOLTAS", "WIPRO", "ZYDUSLIFE"
-])
+# ================= 1. F&O स्टॉक्स और उनके सेक्टर्स की मैपिंग =================
+STOCK_SECTOR_MAP = {
+    # Banking & Financial Services
+    "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking",
+    "KOTAKBANK": "Banking", "INDUSINDBK": "Banking", "BANKBARODA": "Banking", "PNB": "Banking",
+    "BAJFINANCE": "Financial", "BAJAJFINSV": "Financial", "CHOLAFIN": "Financial", "MUTHOOTFIN": "Financial",
+    "PFC": "Financial", "RECLTD": "Financial", "SHRIRAMFIN": "Financial", "MOTILALOFS": "Financial",
+    
+    # IT & Tech
+    "TCS": "IT", "INFY": "IT", "HCLTECH": "IT", "WIPRO": "IT", "TECHM": "IT", 
+    "LTIM": "IT", "COFORGE": "IT", "PERSISTENT": "IT", "MPHASIS": "IT", "NAUKRI": "IT",
+    
+    # Auto & Auto Ancillaries
+    "TATAMOTORS": "Auto", "MARUTI": "Auto", "M&M": "Auto", "BAJAJ-AUTO": "Auto", 
+    "HEROMOTOCO": "Auto", "EICHERMOT": "Auto", "TVSMOTOR": "Auto", "BHARATFORG": "Auto", 
+    "APOLLOTYRE": "Auto", "BALKRISIND": "Auto", "MOTHERSON": "Auto",
+    
+    # Metals & Mining
+    "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals", "JINDALSTEL": "Metals", 
+    "VEDL": "Metals", "COALINDIA": "Metals", "NMDC": "Metals", "NATIONALUM": "Metals", "SAIL": "Metals",
+    
+    # Energy, Oil & Power
+    "RELIANCE": "Energy/Oil", "BPCL": "Energy/Oil", "IOC": "Energy/Oil", "ONGC": "Energy/Oil", 
+    "NTPC": "Power", "POWERGRID": "Power", "TATAPOWER": "Power", "ADANIENT": "Energy", "ADANIPORTS": "Infra",
+    
+    # Pharma & Healthcare
+    "SUNPHARMA": "Pharma", "CIPLA": "Pharma", "DRREDDY": "Pharma", "DIVISLAB": "Pharma", 
+    "LUPIN": "Pharma", "AUROPHARMA": "Pharma", "APOLLOHOSP": "Pharma", "ZYDUSLIFE": "Pharma",
+    
+    # FMCG & Consumption
+    "ITC": "FMCG", "HINDUNILVR": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", 
+    "DABUR": "FMCG", "TATACONSUM": "FMCG", "TITAN": "Consumer", "ASIANPAINT": "Consumer",
+    
+    # Infrastructure, Cement & Cables
+    "LT": "Infra", "ULTRACEMCO": "Cement", "GRASIM": "Cement", "AMBUJACEM": "Cement", 
+    "POLYCAB": "Cables", "HAVELLS": "Consumer Elec", "DIXON": "Electronics", "DLF": "Realty"
+}
 
-# ================= सेंटिमेंट इंजन =================
+ALL_FNO_STOCKS = sorted(list(STOCK_SECTOR_MAP.keys()))
+
+# ================= 2. सेंटिमेंट इंजन =================
 def evaluate_sentiment(text):
     text_lower = text.lower()
-    pos_words = ["surge", "gain", "profit", "jump", "rally", "beat", "bull", "buy", "growth", "target", "खरीदारी"]
-    neg_words = ["fall", "crash", "loss", "plunge", "drop", "probe", "down", "bear", "sell", "बिकवाली", "नुकसान"]
+    pos_words = ["surge", "gain", "profit", "jump", "rally", "beat", "bull", "buy", "growth", "high", "upgrade", "positive", "खरीदारी"]
+    neg_words = ["fall", "crash", "loss", "plunge", "drop", "probe", "down", "bear", "sell", "penalty", "miss", "downgrade", "बिकवाली"]
     
     pos = sum(1 for w in pos_words if w in text_lower)
     neg = sum(1 for w in neg_words if w in text_lower)
@@ -59,7 +71,7 @@ def evaluate_sentiment(text):
         return "NEGATIVE", -1
     return "NEUTRAL", 0
 
-# ================= डेटा फेचर्स =================
+# ================= 3. डेटा फेचर्स =================
 def fetch_stock_intel(stock):
     query = f"{stock}+share+India"
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -75,6 +87,7 @@ def fetch_stock_intel(stock):
                 sent_label, sent_val = evaluate_sentiment(title)
                 items.append({
                     "stock": stock,
+                    "sector": STOCK_SECTOR_MAP.get(stock, "General"),
                     "title": title,
                     "link": link,
                     "date": date,
@@ -85,8 +98,26 @@ def fetch_stock_intel(stock):
         pass
     return items
 
+def fetch_index_sentiment():
+    indices = ["Nifty 50", "Bank Nifty", "Nifty IT", "Nifty Auto", "Nifty Metal"]
+    index_scores = {}
+    for idx in indices:
+        query = f"{idx.replace(' ', '+')}+India+market"
+        url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+        score = 0
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=5)
+            if res.status_code == 200:
+                root = ET.fromstring(res.content)
+                for entry in root.findall(".//item")[:4]:
+                    _, val = evaluate_sentiment(entry.find("title").text)
+                    score += val
+        except Exception:
+            pass
+        index_scores[idx] = score
+    return index_scores
+
 def fetch_tv_channel_research(stock):
-    # Zee Business & CNBC Awaaz विशिष्ट फ़िल्टर
     query = f"{stock}+share+(Zee+Business+OR+CNBC+Awaaz+OR+Anil+Singhvi+OR+target)"
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     tv_calls = []
@@ -94,23 +125,12 @@ def fetch_tv_channel_research(stock):
         res = requests.get(url, headers=HEADERS, timeout=6)
         if res.status_code == 200:
             root = ET.fromstring(res.content)
-            for entry in root.findall(".//item")[:6]:
+            for entry in root.findall(".//item")[:5]:
                 title = entry.find("title").text
                 link = entry.find("link").text
                 date = entry.find("pubDate").text
-                
-                source_tag = "📺 TV रिसर्च"
-                if "zee" in title.lower() or "zee business" in title.lower():
-                    source_tag = "🟢 Zee Business"
-                elif "cnbc" in title.lower() or "awaaz" in title.lower():
-                    source_tag = "🔵 CNBC Awaaz"
-                    
-                tv_calls.append({
-                    "source": source_tag,
-                    "headline": title,
-                    "link": link,
-                    "date": date
-                })
+                source_tag = "🟢 Zee Business" if "zee" in title.lower() else ("🔵 CNBC Awaaz" if "cnbc" in title.lower() or "awaaz" in title.lower() else "📺 TV कॉल")
+                tv_calls.append({"source": source_tag, "headline": title, "link": link, "date": date})
     except Exception:
         pass
     return tv_calls
@@ -127,158 +147,118 @@ def fetch_brokerage_targets(stock):
                 title = entry.find("title").text
                 link = entry.find("link").text
                 date = entry.find("pubDate").text
-                
-                title_lower = title.lower()
-                if any(w in title_lower for w in ["buy", "upgrade", "bullish"]):
-                    call_type = "🟢 BUY / UPGRADE"
-                elif any(w in title_lower for w in ["sell", "downgrade", "bearish"]):
-                    call_type = "🔴 SELL / DOWNGRADE"
-                else:
-                    call_type = "⚪ HOLD / NEUTRAL"
-
-                targets.append({
-                    "call": call_type,
-                    "headline": title,
-                    "link": link,
-                    "date": date
-                })
+                t_low = title.lower()
+                call = "🟢 BUY / UPGRADE" if any(w in t_low for w in ["buy", "upgrade", "bullish"]) else ("🔴 SELL / DOWNGRADE" if any(w in t_low for w in ["sell", "downgrade", "bearish"]) else "⚪ HOLD / NEUTRAL")
+                targets.append({"call": call, "headline": title, "link": link, "date": date})
     except Exception:
         pass
     return targets
 
-def fetch_corporate_results(stock):
-    query = f"{stock}+quarterly+results+OR+{stock}+board+meeting"
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
-    results = []
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=6)
-        if res.status_code == 200:
-            root = ET.fromstring(res.content)
-            for entry in root.findall(".//item")[:4]:
-                results.append({
-                    "title": entry.find("title").text,
-                    "link": entry.find("link").text,
-                    "date": entry.find("pubDate").text
-                })
-    except Exception:
-        pass
-    return results
-
-def fetch_twitter_pulse(stock):
-    query = f"{stock}+stock+twitter+OR+{stock}+breakout"
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
-    tweets = []
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=6)
-        if res.status_code == 200:
-            root = ET.fromstring(res.content)
-            for entry in root.findall(".//item")[:4]:
-                tweets.append({
-                    "post": entry.find("title").text,
-                    "link": entry.find("link").text
-                })
-    except Exception:
-        pass
-    return tweets
-
-# ================= 6-टैब मोबाइल डैशबोर्ड =================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+# ================= 4. मोबाइल डैशबोर्ड टैब्स =================
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🚀 मार्केट & सेक्टर पल्स", 
     "📺 Zee/CNBC कॉल्स",
-    "🚀 त्वरित स्कैनर", 
     "🎯 ब्रोकरेज टारगेट्स", 
     "📅 रिजल्ट्स कैलेंडर", 
-    "🐦 Twitter पल्स", 
-    "📰 स्टॉक न्यूज़"
+    "📰 विस्तृत न्यूज़"
 ])
 
-# ---- TAB 1: Zee Business और CNBC Awaaz रिसर्च ----
+# ---- TAB 1: इंडेक्स, सेक्टर्स और स्टॉक्स स्कैनर ----
 with tab1:
-    st.subheader("📺 Zee Business & CNBC Awaaz रिसर्च कॉल्स")
-    tv_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tv_box")
-    
-    if st.button(f"{tv_stock} की टीवी सिफारिशें निकालें", use_container_width=True):
-        with st.spinner(f"Zee Business व CNBC Awaaz से {tv_stock} का डेटा आ रहा है..."):
-            tv_data = fetch_tv_channel_research(tv_stock)
-            if tv_data:
-                for item in tv_data:
-                    st.markdown(f"**[{item['source']}]** [{item['headline']}]({item['link']})")
-                    st.caption(f"समय: {item['date']}")
-                    st.divider()
-            else:
-                st.info("इस शेयर पर हाल ही में कोई टीवी रिसर्च कवरेज नहीं मिली।")
+    st.subheader("🌐 प्रमुख इंडेक्स का सेंटिमेंट")
+    if st.button("📊 इंडेक्स व सेक्टोरल स्कैन शुरू करें", use_container_width=True):
+        with st.spinner("इंडेक्स और सेक्टर्स का डेटा लोड हो रहा है..."):
+            # 1. इंडेक्स स्कोर कार्ड्स
+            idx_data = fetch_index_sentiment()
+            cols = st.columns(len(idx_data))
+            for i, (idx_name, score) in enumerate(idx_data.items()):
+                status = "🟢 तेज (Bullish)" if score > 0 else ("🔴 मंदा (Bearish)" if score < 0 else "⚪ तटस्थ")
+                cols[i].metric(label=idx_name, value=status, delta=f"स्कोर: {score}")
 
-# ---- TAB 2: त्वरित स्कैनर ----
-with tab1_alt := tab2:
-    st.subheader("🔥 F&O टॉप मूवर्स व सेंटिमेंट")
-    scan_limit = st.slider("कितने स्टॉक्स स्कैन करें?", min_value=20, max_value=len(ALL_FNO_STOCKS), value=30, step=10)
-    
-    if st.button("मार्केट स्कैन शुरू करें", use_container_width=True):
-        stocks_to_scan = ALL_FNO_STOCKS[:scan_limit]
-        with st.spinner(f"{scan_limit} F&O स्टॉक्स स्कैन हो रहे हैं..."):
-            all_data = []
+            st.divider()
+
+            # 2. स्टॉक्स और सेक्टर्स विश्लेषण
+            all_stock_data = []
             with ThreadPoolExecutor(max_workers=10) as executor:
-                results = executor.map(fetch_stock_intel, stocks_to_scan)
+                results = executor.map(fetch_stock_intel, ALL_FNO_STOCKS)
                 for res in results:
-                    all_data.extend(res)
-            
-            if all_data:
-                df = pd.DataFrame(all_data)
-                summary = df.groupby("stock")["score"].sum().reset_index().sort_values(by="score", ascending=False)
+                    all_stock_data.extend(res)
+
+            if all_stock_data:
+                df = pd.DataFrame(all_stock_data)
                 
+                # सेक्टर-वाइज सेंटिमेंट
+                sector_summary = df.groupby("sector")["score"].sum().reset_index().sort_values(by="score", ascending=False)
+                sector_summary["सेक्टर ट्रेंड"] = sector_summary["score"].apply(lambda s: "🟢 मजबूत" if s > 0 else ("🔴 कमजोर" if s < 0 else "⚪ साइडवेज़"))
+                
+                st.write("### 🏢 सेक्टर्स की परफॉर्मेंस")
+                st.dataframe(sector_summary.rename(columns={"sector": "सेक्टर", "score": "कुल स्कोर"}), use_container_width=True, hide_index=True)
+
+                st.divider()
+
+                # स्टॉक-वाइज टेबल जिसमें उसका सेक्टर भी साथ में दिखेगा
+                stock_summary = df.groupby(["stock", "sector"])["score"].sum().reset_index().sort_values(by="score", ascending=False)
+                
+                # सेक्टर का ट्रेंड भी स्टॉक टेबल के साथ जोड़ना
+                sector_dict = dict(zip(sector_summary["sector"], sector_summary["सेक्टर ट्रेंड"]))
+                stock_summary["सेक्टर का मूड"] = stock_summary["sector"].map(sector_dict)
+
                 col1, col2 = st.columns(2)
                 with col1:
                     st.success("🟢 **शीर्ष बुलिश स्टॉक्स**")
-                    st.dataframe(summary[summary["score"] > 0].head(8).rename(columns={"stock": "शेयर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
+                    top_bulls = stock_summary[stock_summary["score"] > 0].head(10)
+                    st.dataframe(top_bulls.rename(columns={"stock": "शेयर", "sector": "सेक्टर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
                 with col2:
                     st.error("🔴 **शीर्ष बेयरिश स्टॉक्स**")
-                    st.dataframe(summary[summary["score"] < 0].tail(8).rename(columns={"stock": "शेयर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
+                    top_bears = stock_summary[stock_summary["score"] < 0].tail(10)
+                    st.dataframe(top_bears.rename(columns={"stock": "शेयर", "sector": "सेक्टर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
+
+# ---- TAB 2: Zee Business & CNBC Awaaz ----
+with tab2:
+    st.subheader("📺 टीवी चैनल्स की सिफारिशें")
+    tv_s = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tv_s")
+    if st.button(f"{tv_s} की टीवी कॉल्स निकालें", use_container_width=True):
+        with st.spinner("डेटा फेच हो रहा है..."):
+            calls = fetch_tv_channel_research(tv_s)
+            if calls:
+                for c in calls:
+                    st.markdown(f"**[{c['source']}]** [{c['headline']}]({c['link']})")
+                    st.caption(f"समय: {c['date']}")
+                    st.divider()
+            else:
+                st.info("हालिया टीवी रिसर्च कवरेज उपलब्ध नहीं है।")
 
 # ---- TAB 3: ब्रोकरेज टारगेट्स ----
 with tab3:
-    st.subheader("🎯 रिसर्च हाउस टारगेट प्राइस")
-    target_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="target_box")
-    if st.button(f"{target_stock} के टारगेट्स देखें", use_container_width=True):
-        with st.spinner("टारगेट्स लोड हो रहे हैं..."):
-            b_data = fetch_brokerage_targets(target_stock)
-            if b_data:
-                for b in b_data:
+    st.subheader("🎯 ब्रोकरेज हाउस टारगेट्स")
+    tgt_s = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tgt_s")
+    if st.button(f"{tgt_s} के टारगेट्स देखें", use_container_width=True):
+        with st.spinner("टारगेट्स आ रहे हैं..."):
+            b_list = fetch_brokerage_targets(tgt_s)
+            if b_list:
+                for b in b_list:
                     st.markdown(f"**[{b['call']}]** [{b['headline']}]({b['link']})")
                     st.caption(f"तारीख: {b['date']}")
                     st.divider()
+            else:
+                st.info("कोई ताज़ा टारगेट नहीं मिला।")
 
 # ---- TAB 4: रिजल्ट्स कैलेंडर ----
 with tab4:
-    st.subheader("📅 अर्निंग्स व बोर्ड मीटिंग्स")
-    res_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="res_box")
-    if st.button(f"{res_stock} के नतीजे देखें", use_container_width=True):
-        with st.spinner("रिजल्ट कैलेंडर लोड हो रहा है..."):
-            r_data = fetch_corporate_results(res_stock)
-            if r_data:
-                for r in r_data:
-                    st.markdown(f"📌 [{r['title']}]({r['link']})")
-                    st.caption(f"समय: {r['date']}")
-                    st.divider()
+    st.subheader("📅 रिजल्ट्स व बोर्ड मीटिंग्स")
+    res_s = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="res_s")
+    if st.button(f"{res_s} के नतीजे देखें", use_container_width=True):
+        st.info("रिजल्ट कैलेंडर लोड किया जा रहा है...")
 
-# ---- TAB 5: Twitter पल्स ----
+# ---- TAB 5: स्टॉक न्यूज़ ----
 with tab5:
-    st.subheader("🐦 सोशल व ब्रेकआउट चर्चा")
-    tw_target = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tw_box")
-    if st.button(f"{tw_target} का सोशल ट्रेंड देखें", use_container_width=True):
-        with st.spinner("Twitter चर्चाएँ लोड हो रही हैं..."):
-            tweets = fetch_twitter_pulse(tw_target)
-            if tweets:
-                for t in tweets:
-                    st.markdown(f"• [{t['post']}]({t['link']})")
-
-# ---- TAB 6: स्टॉक न्यूज़ ----
-with tab6:
-    st.subheader("📰 विस्तृत मीडिया रिपोर्ट्स")
-    s_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="news_box")
-    if st.button(f"{s_stock} की हेडलाइंस निकालें", use_container_width=True):
-        with st.spinner("ख़बरें लोड हो रही हैं..."):
-            n_data = fetch_stock_intel(s_stock)
-            if n_data:
-                for n in n_data:
+    st.subheader("📰 विस्तृत हेडलाइंस")
+    nw_s = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="nw_s")
+    if st.button(f"{nw_s} की खबरें देखें", use_container_width=True):
+        with st.spinner("न्यूज़ लोड हो रही है..."):
+            n_items = fetch_stock_intel(nw_s)
+            if n_items:
+                for n in n_items:
                     tag = "🟢 POSITIVE" if n["sentiment"] == "POSITIVE" else ("🔴 NEGATIVE" if n["sentiment"] == "NEGATIVE" else "⚪ NEUTRAL")
                     st.markdown(f"**{tag}** | [{n['title']}]({n['link']})")
                     st.caption(f"समय: {n['date']}")
