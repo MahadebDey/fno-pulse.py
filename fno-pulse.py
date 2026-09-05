@@ -2,22 +2,21 @@ import streamlit as st
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
-from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(
     page_title="F&O Master 360",
-    page_icon="📊",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-st.title("📊 F&O Master 360")
-st.caption("180+ F&O स्टॉक्स का लाइव न्यूज़, सोशल सेंटिमेंट व कॉर्पोरेट रिजल्ट्स ट्रैकर")
+st.title("⚡ F&O Master 360")
+st.caption("F&O स्टॉक्स: टीवी चैनल रिसर्च (Zee Business / CNBC Awaaz), सेंटिमेंट, Twitter व अर्निंग्स")
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ================= 180+ F&O स्टॉक्स की मुकम्मल लिस्ट =================
+# ================= 180+ F&O स्टॉक्स की सूची =================
 ALL_FNO_STOCKS = sorted([
     "AARTIIND", "ABB", "ABBOTINDIA", "ABCAPITAL", "ABFRL", "ACC", "ADANIENT", "ADANIPORTS",
     "ALKEM", "AMBUJACEM", "APOLLOHOSP", "APOLLOTYRE", "ASHOKLEY", "ASIANPAINT", "ASTRAL",
@@ -45,11 +44,11 @@ ALL_FNO_STOCKS = sorted([
     "UPL", "VEDL", "VOLTAS", "WIPRO", "ZYDUSLIFE"
 ])
 
-# ================= 1. सेंटिमेंट इंजन =================
+# ================= सेंटिमेंट इंजन =================
 def evaluate_sentiment(text):
     text_lower = text.lower()
-    pos_words = ["surge", "gain", "profit", "jump", "rally", "beat", "bull", "buy", "growth", "high", "dividend", "up"]
-    neg_words = ["fall", "crash", "loss", "plunge", "drop", "probe", "down", "bear", "sell", "penalty", "miss", "fraud"]
+    pos_words = ["surge", "gain", "profit", "jump", "rally", "beat", "bull", "buy", "growth", "target", "खरीदारी"]
+    neg_words = ["fall", "crash", "loss", "plunge", "drop", "probe", "down", "bear", "sell", "बिकवाली", "नुकसान"]
     
     pos = sum(1 for w in pos_words if w in text_lower)
     neg = sum(1 for w in neg_words if w in text_lower)
@@ -60,7 +59,7 @@ def evaluate_sentiment(text):
         return "NEGATIVE", -1
     return "NEUTRAL", 0
 
-# ================= 2. डेटा फेचर्स =================
+# ================= डेटा फेचर्स =================
 def fetch_stock_intel(stock):
     query = f"{stock}+share+India"
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
@@ -86,8 +85,69 @@ def fetch_stock_intel(stock):
         pass
     return items
 
+def fetch_tv_channel_research(stock):
+    # Zee Business & CNBC Awaaz विशिष्ट फ़िल्टर
+    query = f"{stock}+share+(Zee+Business+OR+CNBC+Awaaz+OR+Anil+Singhvi+OR+target)"
+    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+    tv_calls = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=6)
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            for entry in root.findall(".//item")[:6]:
+                title = entry.find("title").text
+                link = entry.find("link").text
+                date = entry.find("pubDate").text
+                
+                source_tag = "📺 TV रिसर्च"
+                if "zee" in title.lower() or "zee business" in title.lower():
+                    source_tag = "🟢 Zee Business"
+                elif "cnbc" in title.lower() or "awaaz" in title.lower():
+                    source_tag = "🔵 CNBC Awaaz"
+                    
+                tv_calls.append({
+                    "source": source_tag,
+                    "headline": title,
+                    "link": link,
+                    "date": date
+                })
+    except Exception:
+        pass
+    return tv_calls
+
+def fetch_brokerage_targets(stock):
+    query = f"{stock}+share+target+price+OR+{stock}+brokerage+rating"
+    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+    targets = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=6)
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            for entry in root.findall(".//item")[:5]:
+                title = entry.find("title").text
+                link = entry.find("link").text
+                date = entry.find("pubDate").text
+                
+                title_lower = title.lower()
+                if any(w in title_lower for w in ["buy", "upgrade", "bullish"]):
+                    call_type = "🟢 BUY / UPGRADE"
+                elif any(w in title_lower for w in ["sell", "downgrade", "bearish"]):
+                    call_type = "🔴 SELL / DOWNGRADE"
+                else:
+                    call_type = "⚪ HOLD / NEUTRAL"
+
+                targets.append({
+                    "call": call_type,
+                    "headline": title,
+                    "link": link,
+                    "date": date
+                })
+    except Exception:
+        pass
+    return targets
+
 def fetch_corporate_results(stock):
-    query = f"{stock}+quarterly+results+OR+{stock}+board+meeting+date"
+    query = f"{stock}+quarterly+results+OR+{stock}+board+meeting"
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     results = []
     try:
@@ -113,29 +173,48 @@ def fetch_twitter_pulse(stock):
         if res.status_code == 200:
             root = ET.fromstring(res.content)
             for entry in root.findall(".//item")[:4]:
-                title = entry.find("title").text
-                link = entry.find("link").text
-                sent_label, _ = evaluate_sentiment(title)
                 tweets.append({
-                    "post": title,
-                    "link": link,
-                    "sent": sent_label
+                    "post": entry.find("title").text,
+                    "link": entry.find("link").text
                 })
     except Exception:
         pass
     return tweets
 
-# ================= 3. मोबाइल-फ्रेंडली टैब इंटरफ़ेस =================
-tab1, tab2, tab3, tab4 = st.tabs(["🚀 त्वरित स्कैनर", "📅 रिजल्ट्स कैलेंडर", "📰 स्टॉक रिपोर्ट्स", "🐦 सोशल पल्स"])
+# ================= 6-टैब मोबाइल डैशबोर्ड =================
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📺 Zee/CNBC कॉल्स",
+    "🚀 त्वरित स्कैनर", 
+    "🎯 ब्रोकरेज टारगेट्स", 
+    "📅 रिजल्ट्स कैलेंडर", 
+    "🐦 Twitter पल्स", 
+    "📰 स्टॉक न्यूज़"
+])
 
-# ---- TAB 1: त्वरित मार्केट स्कैनर ----
+# ---- TAB 1: Zee Business और CNBC Awaaz रिसर्च ----
 with tab1:
-    st.subheader("🔥 F&O टॉप मूवर्स व सेंटिमेंट")
-    scan_limit = st.slider("कितने लिक्विड स्टॉक्स स्कैन करें?", min_value=20, max_value=len(ALL_FNO_STOCKS), value=35, step=15)
+    st.subheader("📺 Zee Business & CNBC Awaaz रिसर्च कॉल्स")
+    tv_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tv_box")
     
-    if st.button("बाज़ार सेंटिमेंट स्कैन करें", use_container_width=True):
+    if st.button(f"{tv_stock} की टीवी सिफारिशें निकालें", use_container_width=True):
+        with st.spinner(f"Zee Business व CNBC Awaaz से {tv_stock} का डेटा आ रहा है..."):
+            tv_data = fetch_tv_channel_research(tv_stock)
+            if tv_data:
+                for item in tv_data:
+                    st.markdown(f"**[{item['source']}]** [{item['headline']}]({item['link']})")
+                    st.caption(f"समय: {item['date']}")
+                    st.divider()
+            else:
+                st.info("इस शेयर पर हाल ही में कोई टीवी रिसर्च कवरेज नहीं मिली।")
+
+# ---- TAB 2: त्वरित स्कैनर ----
+with tab1_alt := tab2:
+    st.subheader("🔥 F&O टॉप मूवर्स व सेंटिमेंट")
+    scan_limit = st.slider("कितने स्टॉक्स स्कैन करें?", min_value=20, max_value=len(ALL_FNO_STOCKS), value=30, step=10)
+    
+    if st.button("मार्केट स्कैन शुरू करें", use_container_width=True):
         stocks_to_scan = ALL_FNO_STOCKS[:scan_limit]
-        with st.spinner(f"{scan_limit} F&O स्टॉक्स का डेटा प्रोसेस हो रहा है..."):
+        with st.spinner(f"{scan_limit} F&O स्टॉक्स स्कैन हो रहे हैं..."):
             all_data = []
             with ThreadPoolExecutor(max_workers=10) as executor:
                 results = executor.map(fetch_stock_intel, stocks_to_scan)
@@ -149,59 +228,58 @@ with tab1:
                 col1, col2 = st.columns(2)
                 with col1:
                     st.success("🟢 **शीर्ष बुलिश स्टॉक्स**")
-                    top_bulls = summary[summary["score"] > 0].head(8)
-                    st.dataframe(top_bulls.rename(columns={"stock": "शेयर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
+                    st.dataframe(summary[summary["score"] > 0].head(8).rename(columns={"stock": "शेयर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
                 with col2:
                     st.error("🔴 **शीर्ष बेयरिश स्टॉक्स**")
-                    top_bears = summary[summary["score"] < 0].tail(8)
-                    st.dataframe(top_bears.rename(columns={"stock": "शेयर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
-            else:
-                st.warning("डेटा फेच नहीं हो पाया।")
+                    st.dataframe(summary[summary["score"] < 0].tail(8).rename(columns={"stock": "शेयर", "score": "स्कोर"}), use_container_width=True, hide_index=True)
 
-# ---- TAB 2: कॉर्पोरेट रिजल्ट्स व बोर्ड मीटिंग्स ----
-with tab2:
-    st.subheader("📅 अर्निंग्स व बोर्ड मीटिंग ट्रैकर")
-    target_stock = st.selectbox("नतीजे चेक करने के लिए शेयर चुनें:", ALL_FNO_STOCKS, key="res_box")
-    
-    if st.button(f"{target_stock} का रिजल्ट अपडेट देखें", use_container_width=True):
-        with st.spinner("रिजल्ट कैलेंडर और घोषणाएँ लोड हो रही हैं..."):
-            res_data = fetch_corporate_results(target_stock)
-            if res_data:
-                for r in res_data:
-                    st.markdown(f"📌 **[{r['title']}]({r['link']})**")
-                    st.caption(f"अपडेट समय: {r['date']}")
-                    st.divider()
-            else:
-                st.info("इस शेयर के लिए कोई हालिया रिजल्ट घोषणा नहीं मिली।")
-
-# ---- TAB 3: सिंगल स्टॉक न्यूज़ ----
+# ---- TAB 3: ब्रोकरेज टारगेट्स ----
 with tab3:
-    st.subheader("📰 विस्तृत न्यूज़ व ब्रोकरेज रिपोर्ट्स")
-    s_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="rep_box")
-    
-    if st.button(f"{s_stock} की रिपोर्ट्स निकालें", use_container_width=True):
+    st.subheader("🎯 रिसर्च हाउस टारगेट प्राइस")
+    target_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="target_box")
+    if st.button(f"{target_stock} के टारगेट्स देखें", use_container_width=True):
+        with st.spinner("टारगेट्स लोड हो रहे हैं..."):
+            b_data = fetch_brokerage_targets(target_stock)
+            if b_data:
+                for b in b_data:
+                    st.markdown(f"**[{b['call']}]** [{b['headline']}]({b['link']})")
+                    st.caption(f"तारीख: {b['date']}")
+                    st.divider()
+
+# ---- TAB 4: रिजल्ट्स कैलेंडर ----
+with tab4:
+    st.subheader("📅 अर्निंग्स व बोर्ड मीटिंग्स")
+    res_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="res_box")
+    if st.button(f"{res_stock} के नतीजे देखें", use_container_width=True):
+        with st.spinner("रिजल्ट कैलेंडर लोड हो रहा है..."):
+            r_data = fetch_corporate_results(res_stock)
+            if r_data:
+                for r in r_data:
+                    st.markdown(f"📌 [{r['title']}]({r['link']})")
+                    st.caption(f"समय: {r['date']}")
+                    st.divider()
+
+# ---- TAB 5: Twitter पल्स ----
+with tab5:
+    st.subheader("🐦 सोशल व ब्रेकआउट चर्चा")
+    tw_target = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tw_box")
+    if st.button(f"{tw_target} का सोशल ट्रेंड देखें", use_container_width=True):
+        with st.spinner("Twitter चर्चाएँ लोड हो रही हैं..."):
+            tweets = fetch_twitter_pulse(tw_target)
+            if tweets:
+                for t in tweets:
+                    st.markdown(f"• [{t['post']}]({t['link']})")
+
+# ---- TAB 6: स्टॉक न्यूज़ ----
+with tab6:
+    st.subheader("📰 विस्तृत मीडिया रिपोर्ट्स")
+    s_stock = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="news_box")
+    if st.button(f"{s_stock} की हेडलाइंस निकालें", use_container_width=True):
         with st.spinner("ख़बरें लोड हो रही हैं..."):
-            news = fetch_stock_intel(s_stock)
-            if news:
-                for n in news:
+            n_data = fetch_stock_intel(s_stock)
+            if n_data:
+                for n in n_data:
                     tag = "🟢 POSITIVE" if n["sentiment"] == "POSITIVE" else ("🔴 NEGATIVE" if n["sentiment"] == "NEGATIVE" else "⚪ NEUTRAL")
                     st.markdown(f"**{tag}** | [{n['title']}]({n['link']})")
                     st.caption(f"समय: {n['date']}")
                     st.divider()
-            else:
-                st.info("कोई ताज़ा ख़बर नहीं मिली।")
-
-# ---- TAB 4: ट्विटर / सोशल पल्स ----
-with tab4:
-    st.subheader("🐦 सोशल चर्चा व ब्रेकआउट कॉल्स")
-    tw_target = st.selectbox("शेयर चुनें:", ALL_FNO_STOCKS, key="tw_box")
-    
-    if st.button(f"{tw_target} का सोशल ट्रेंड देखें", use_container_width=True):
-        with st.spinner("सोशल ट्रेंड्स स्कैन हो रहे हैं..."):
-            social = fetch_twitter_pulse(tw_target)
-            if social:
-                for s in social:
-                    badge = "🟢 बुलिश" if s["sent"] == "POSITIVE" else "⚪ सामान्य"
-                    st.markdown(f"• **[{badge}]** [{s['post']}]({s['link']})")
-            else:
-                st.info("सोशल मीडिया पर कोई ताज़ा गतिविधि नहीं मिली।")
