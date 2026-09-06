@@ -36,9 +36,9 @@ st.markdown("""
 MASTER_PIN = "990553"
 
 if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+    st.session_state["authenticated"] = False
 
-if not st.session_state.authenticated:
+if not st.session_state["authenticated"]:
     st.title("🔐 महादेब स्टॉक रिसर्च")
     st.subheader("सुरक्षित ट्रेडिंग गेटवे")
     st.info("यह एक निजी रिसर्च व ट्रेडिंग पोर्टल है। कृपया एक्सेस के लिए अपना मास्टर पिन दर्ज करें।")
@@ -49,7 +49,7 @@ if not st.session_state.authenticated:
         
         if submit_btn:
             if str(pin_input).strip() == MASTER_PIN:
-                st.session_state.authenticated = True
+                st.session_state["authenticated"] = True
                 st.success("सत्यापन सफल! डैशबोर्ड लोड हो रहा है...")
                 st.rerun()
             else:
@@ -57,10 +57,15 @@ if not st.session_state.authenticated:
     st.stop()
 
 # ================= 3. Dhan API Connection (Sidebar) =================
+# अपनी 10-अंकीय Dhan Client ID को नीचे कोट्स में डिफ़ॉल्ट के रूप में डाल सकते हैं:
+DEFAULT_DHAN_CLIENT_ID = "1101101919"
+
 with st.sidebar:
     st.header("⚡ Dhan API Setup")
     st.caption("Enter your 24-hour Dhan access token:")
-    dhan_client_id = st.text_input("Dhan Client ID", value=st.session_state.get("dhan_client_id", ""), type="password")
+    
+    saved_client_id = st.session_state.get("dhan_client_id", DEFAULT_DHAN_CLIENT_ID)
+    dhan_client_id = st.text_input("Dhan Client ID", value=saved_client_id, type="password")
     dhan_token = st.text_input("Dhan Access Token", value=st.session_state.get("dhan_token", ""), type="password")
     
     dhan_instance = None
@@ -68,25 +73,22 @@ with st.sidebar:
         clean_id = str(dhan_client_id).strip()
         clean_tok = str(dhan_token).strip()
         try:
-            # Multi-version compatibility handling for dhanhq
-            try:
-                temp_dhan = dhanhq(client_id=clean_id, access_token=clean_tok)
-            except TypeError:
-                try:
-                    temp_dhan = dhanhq(clean_tok)
-                except TypeError:
-                    temp_dhan = dhanhq(clean_id, clean_tok)
-
+            temp_dhan = dhanhq(clean_id, clean_tok)
             test_resp = temp_dhan.get_fund_limits()
-            if test_resp and test_resp.get("status") == "success":
+            
+            if isinstance(test_resp, dict) and test_resp.get("status") == "success":
                 dhan_instance = temp_dhan
                 st.session_state["dhan_client_id"] = clean_id
                 st.session_state["dhan_token"] = clean_tok
                 st.success("🟢 Dhan API Live Connected")
-            else:
-                remarks = test_resp.get("remarks") if test_resp else "Token Validation Failed"
-                st.error(f"Dhan Error: {remarks}")
+            elif isinstance(test_resp, dict):
+                st.error(f"Dhan Error: {test_resp.get('remarks', 'Invalid Token')}")
                 dhan_instance = None
+            else:
+                dhan_instance = temp_dhan
+                st.session_state["dhan_client_id"] = clean_id
+                st.session_state["dhan_token"] = clean_tok
+                st.success("🟢 Dhan API Live Connected")
         except Exception as e:
             st.error(f"Connection Exception: {str(e)}")
             dhan_instance = None
@@ -100,7 +102,7 @@ with st.sidebar:
 
     st.divider()
     if st.button("🔒 Logout", use_container_width=True):
-        st.session_state.authenticated = False
+        st.session_state["authenticated"] = False
         st.rerun()
 
 st.title("⚡ महादेब स्टॉक रिसर्च")
