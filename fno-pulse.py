@@ -87,9 +87,9 @@ if not st.session_state["authenticated"]:
 
 # ================= 3. Session State Initialization =================
 if "chart_tf" not in st.session_state:
-    st.session_state["chart_tf"] = "5m"
+    st.session_state["chart_tf"] = "3m"
 if "chart_type" not in st.session_state:
-    st.session_state["chart_type"] = "Regular Candlestick"
+    st.session_state["chart_type"] = "Heikin-Ashi (हेइकिन-आशी)"
 if "chart_show_ema" not in st.session_state:
     st.session_state["chart_show_ema"] = True
 if "selected_fno_asset" not in st.session_state:
@@ -98,10 +98,12 @@ if "sector_scan_data" not in st.session_state:
     st.session_state["sector_scan_data"] = None
 if "top5_scan_data" not in st.session_state:
     st.session_state["top5_scan_data"] = None
+if "pure_news_data" not in st.session_state:
+    st.session_state["pure_news_data"] = None
 if "strategy_signals_data" not in st.session_state:
     st.session_state["strategy_signals_data"] = None
 if "chart_zoom_level" not in st.session_state:
-    st.session_state["chart_zoom_level"] = 0  # लेंस ज़ूम लेवल
+    st.session_state["chart_zoom_level"] = 0
 
 # ================= 4. Permanent Token Cache Functions =================
 TOKEN_CACHE_FILE = ".dhan_token_cache.json"
@@ -191,12 +193,13 @@ with st.sidebar:
     def update_ema(): st.session_state["chart_show_ema"] = st.session_state["sb_chart_ema"]
 
     st.radio("कैंडल प्रकार:", ["Regular Candlestick", "Heikin-Ashi (हेइकिन-आशी)"],
-             index=0 if st.session_state["chart_type"] == "Regular Candlestick" else 1,
+             index=1 if "Heikin" in st.session_state["chart_type"] else 0,
              key="sb_chart_type", on_change=update_type)
     
-    st.selectbox("टाइमफ्रेम:", ["1m", "5m", "15m", "1h", "1d"],
-                 index=["1m", "5m", "15m", "1h", "1d"].index(st.session_state["chart_tf"]),
-                 format_func=lambda x: {"1m": "1 Min (Scalp)", "5m": "5 Min (Intraday)", "15m": "15 Min (Trend)", "1h": "1 Hour", "1d": "Daily"}.get(x, x),
+    tf_options = ["1m", "3m", "5m", "15m", "1h", "1d"]
+    st.selectbox("टाइमफ्रेम:", tf_options,
+                 index=tf_options.index(st.session_state.get("chart_tf", "3m")),
+                 format_func=lambda x: {"1m": "1 Min (Scalp)", "3m": "3 Min (Special HA & Option Buying)", "5m": "5 Min (Intraday)", "15m": "15 Min (Trend)", "1h": "1 Hour", "1d": "Daily"}.get(x, x),
                  key="sb_chart_tf", on_change=update_tf)
     
     st.toggle("9 EMA (गोल्डन लाइन)", value=st.session_state["chart_show_ema"], key="sb_chart_ema", on_change=update_ema)
@@ -341,7 +344,62 @@ ALL_SECTOR_INDICES = {
     "निफ्टी इंफ्रा (Infra)": "^CNXINFRA"
 }
 
-# ================= 7. Granular Scoring & Research Functions =================
+# ================= 7. Data Loader & 3-Min Resampling =================
+def load_and_resample_ohlc(yf_ticker, tf):
+    if tf == "3m":
+        df = yf.download(yf_ticker, period="3d", interval="1m", progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 5:
+            return pd.DataFrame()
+        if df.index.tz is not None:
+            df.index = df.index.tz_convert("Asia/Kolkata")
+        else:
+            df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+        df = df.between_time('09:15', '15:40')
+        resampled = df.resample('3min').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last',
+            'Volume': 'sum'
+        }).dropna()
+        return resampled
+    else:
+        tf_params = {
+            "1m": {"period": "2d", "interval": "1m"},
+            "5m": {"period": "5d", "interval": "5m"},
+            "15m": {"period": "10d", "interval": "15m"},
+            "1h": {"period": "1mo", "interval": "60m"},
+            "1d": {"period": "6mo", "interval": "1d"}
+        }
+        cfg = tf_params.get(tf, {"period": "5d", "interval": "5m"})
+        df = yf.download(yf_ticker, period=cfg["period"], interval=cfg["interval"], progress=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        if df.empty or len(df) < 2:
+            return pd.DataFrame()
+        if tf in ["1m", "5m", "15m"]:
+            if df.index.tz is not None:
+                df.index = df.index.tz_convert("Asia/Kolkata")
+            else:
+                df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
+            df = df.between_time('09:15', '15:40')
+        return df
+
+def compute_heikin_ashi(df):
+    ha = pd.DataFrame(index=df.index)
+    ha['Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4.0
+    ha_open = np.zeros(len(df))
+    ha_open[0] = (df['Open'].iloc[0] + df['Close'].iloc[0]) / 2.0
+    for i in range(1, len(df)):
+        ha_open[i] = (ha_open[i-1] + ha['Close'].iloc[i-1]) / 2.0
+    ha['Open'] = ha_open
+    ha['High'] = pd.concat([df['High'], ha['Open'], ha['Close']], axis=1).max(axis=1)
+    ha['Low'] = pd.concat([df['Low'], ha['Open'], ha['Close']], axis=1).min(axis=1)
+    return ha
+
+# ================= 8. Research & Pure Twitter/News Scorer =================
 def fetch_rss_feed(query, limit=10):
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     results = []
@@ -363,23 +421,31 @@ def fetch_rss_feed(query, limit=10):
         pass
     return results
 
-def fetch_twitter_pulse(symbol):
-    feed = fetch_rss_feed(f"{symbol}+share+(Twitter+OR+X+OR+breakout+OR+target)", limit=4)
+def fetch_pure_twitter_news_score(symbol):
+    feed = fetch_rss_feed(f"{symbol}+share+(Twitter+OR+X+OR+news+OR+target+OR+results)", limit=6)
     if not feed:
-        return "⚪ न्यूट्रल", 0.0
+        return 0.0, "⚪ सामान्य (No News)", []
     text_blob = " ".join([item['title'].lower() for item in feed])
-    bullish_keywords = ["buy", "breakout", "target", "bullish", "rally", "surge", "calls", "upgrade", "multibagger"]
-    bearish_keywords = ["sell", "fall", "drop", "bearish", "crash", "loss", "puts", "downgrade", "breakdown"]
+    bull_words = ["buy", "profit", "surge", "rally", "breakout", "upgrade", "growth", "win", "high", "order", "expansion"]
+    bear_words = ["sell", "loss", "drop", "fall", "crash", "downgrade", "probe", "penalty", "fraud", "weak", "miss"]
     
-    b_score = sum(1.2 for kw in bullish_keywords if kw in text_blob)
-    be_score = sum(1.2 for kw in bearish_keywords if kw in text_blob)
-    
-    net_tw = round(b_score - be_score, 2)
-    if net_tw > 1.0:
-        return f"🟢 बुलिश (+{net_tw})", net_tw
-    elif net_tw < -1.0:
-        return f"🔴 बेयरिश ({net_tw})", net_tw
-    return "⚪ न्यूट्रल", 0.0
+    b_count = sum(1.5 for w in bull_words if w in text_blob)
+    be_count = sum(1.5 for w in bear_words if w in text_blob)
+    net_sentiment = round(b_count - be_count, 2)
+
+    status = "🟢 बुलिश सेंटीमेंट" if net_sentiment > 1.0 else ("🔴 बेयरिश सेंटीमेंट" if net_sentiment < -1.0 else "⚪ न्यूट्रल")
+    return net_sentiment, status, [f['title'] for f in feed[:3]]
+
+def analyze_stock_pure_sentiment(symbol):
+    meta = FNO_RAW_MAP.get(symbol, {"sec": "अन्य"})
+    net_score, status, top_headlines = fetch_pure_twitter_news_score(symbol)
+    return {
+        "शेयर": symbol,
+        "सेक्टर": meta["sec"],
+        "सेंटीमेंट स्टेटस": status,
+        "सोशल/न्यूज़ स्कोर": net_score,
+        "ताज़ा हेडलाइन": top_headlines[0] if top_headlines else "कोई मुख्य हेडलाइन नहीं"
+    }
 
 def scan_sector_item(item):
     name, ticker = item
@@ -455,8 +521,8 @@ def analyze_stock_full(symbol):
             if rsi > 60: score += round((rsi - 60) * 0.15, 2)
             elif rsi < 40: score -= round((40 - rsi) * 0.15, 2)
 
-            tw_status, tw_pts = fetch_twitter_pulse(symbol)
-            score += tw_pts
+            tw_score, tw_status, _ = fetch_pure_twitter_news_score(symbol)
+            score += tw_score
             details["ट्विटर पल्स"] = tw_status
 
             details["तकनीकी रुझान"] = "🟢 मजबूत" if score > 1.5 else ("🔴 कमजोर" if score < -1.5 else "⚪ न्यूट्रल")
@@ -466,74 +532,107 @@ def analyze_stock_full(symbol):
     except Exception:
         return None
 
-# ================= 8. Live Strategy Scanner Engine =================
+# ================= 9. Strategy Scanner Engine (Including Stock Option Buying) =================
 def scan_stock_strategy(item, strategy_name):
     symbol, meta = item
     try:
-        df = yf.download(meta["yf"], period="5d", interval="5m", progress=False)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        if len(df) < 15: return None
-
-        if df.index.tz is not None:
-            df.index = df.index.tz_convert("Asia/Kolkata")
-        else:
-            df.index = df.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
-        df = df.between_time('09:15', '15:40')
-
-        if len(df) < 10: return None
+        # 3-Minute Resampled Data for High Accuracy
+        df = load_and_resample_ohlc(meta["yf"], "3m")
+        if df.empty or len(df) < 10: 
+            return None
 
         cmp_val = round(float(df['Close'].iloc[-1]), 2)
-        ema9 = df['Close'].ewm(span=9, adjust=False).mean()
-        prev_close = float(df['Close'].iloc[-2])
-        prev_ema9 = float(ema9.iloc[-2])
-        curr_ema9 = float(ema9.iloc[-1])
-
         signal = "⚪ NO SIGNAL"
         reason = ""
 
-        if "9 EMA" in strategy_name:
-            if prev_close <= prev_ema9 and cmp_val > curr_ema9:
+        # Daily Data for PDH/PDL and Open Price
+        daily = yf.download(meta["yf"], period="5d", interval="1d", progress=False)
+        if isinstance(daily.columns, pd.MultiIndex):
+            daily.columns = daily.columns.get_level_values(0)
+
+        # ---------------- 1. PDH / PDL Breakout + 2x Volume (Option Buying) ----------------
+        if "PDH / PDL" in strategy_name:
+            if len(daily) >= 2:
+                pdh = float(daily['High'].iloc[-2])
+                pdl = float(daily['Low'].iloc[-2])
+                
+                # Volume Condition (2x of last 5 candles avg)
+                avg_vol = df['Volume'].iloc[-6:-1].mean()
+                curr_vol = df['Volume'].iloc[-1]
+                vol_blast = curr_vol >= (avg_vol * 1.8) if avg_vol > 0 else True
+                
+                # VWAP Calculation
+                typ = (df['High'] + df['Low'] + df['Close']) / 3
+                vwap = (typ * df['Volume']).cumsum() / df['Volume'].cumsum()
+                curr_vwap = float(vwap.iloc[-1])
+
+                if cmp_val > pdh and cmp_val >= curr_vwap and vol_blast:
+                    signal = "🟢 BUY ATM CALL (PDH Breakout + 2x Vol)"
+                    reason = f"कल का High (₹{pdh:.1f}) तोड़ा + 2x वॉल्यूम ब्लास्ट"
+                elif cmp_val < pdl and cmp_val <= curr_vwap and vol_blast:
+                    signal = "🔴 BUY ATM PUT (PDL Breakdown + 2x Vol)"
+                    reason = f"कल का Low (₹{pdl:.1f}) तोड़ा + 2x वॉल्यूम ब्लास्ट"
+
+        # ---------------- 2. Open = Low / Open = High Momentum ----------------
+        elif "Open = Low" in strategy_name or "Open = High" in strategy_name:
+            if not daily.empty:
+                today_open = float(daily['Open'].iloc[-1])
+                today_low = float(daily['Low'].iloc[-1])
+                today_high = float(daily['High'].iloc[-1])
+                
+                # Open == Low (CE Buying)
+                if abs(today_open - today_low) <= (today_open * 0.001):
+                    if cmp_val > df['High'].iloc[:3].max():
+                        signal = "🟢 BUY ATM CALL (Open=Low Momentum)"
+                        reason = f"ओपन = लो (₹{today_open:.1f}) + 3-मिनट हाई ब्रेक"
+                
+                # Open == High (PE Buying)
+                elif abs(today_open - today_high) <= (today_open * 0.001):
+                    if cmp_val < df['Low'].iloc[:3].min():
+                        signal = "🔴 BUY ATM PUT (Open=High Breakdown)"
+                        reason = f"ओपन = हाई (₹{today_open:.1f}) + 3-मिनट लो ब्रेक"
+
+        # ---------------- 3. 3-Minute Heikin-Ashi 3-Streak ----------------
+        elif "3-Minute" in strategy_name or "Heikin-Ashi" in strategy_name:
+            ha = compute_heikin_ashi(df)
+            c1_bull = ha['Close'].iloc[-1] > ha['Open'].iloc[-1]
+            c2_bull = ha['Close'].iloc[-2] > ha['Open'].iloc[-2]
+            c3_bull = ha['Close'].iloc[-3] > ha['Open'].iloc[-3]
+            
+            c1_bear = ha['Close'].iloc[-1] < ha['Open'].iloc[-1]
+            c2_bear = ha['Close'].iloc[-2] < ha['Open'].iloc[-2]
+            c3_bear = ha['Close'].iloc[-3] < ha['Open'].iloc[-3]
+
+            if c1_bull and c2_bull and c3_bull:
+                signal = "🟢 BUY ENTRY (3 Green HA Streak)"
+                reason = "3-मिनट पर लगातार 3 मजबूत हरी कैंडल्स"
+            elif c1_bear and c2_bear and c3_bear:
+                signal = "🔴 BEARISH ENTRY (3 Red HA Streak)"
+                reason = "3-मिनट पर लगातार 3 मजबूत लाल कैंडल्स"
+
+        # ---------------- 4. 9 EMA Breakout ----------------
+        elif "9 EMA" in strategy_name:
+            ema9 = df['Close'].ewm(span=9, adjust=False).mean()
+            if df['Close'].iloc[-2] <= ema9.iloc[-2] and cmp_val > ema9.iloc[-1]:
                 signal = "🟢 BUY (9 EMA Crossover)"
-                reason = "भाव ने 9 EMA को नीचे से ऊपर काटा"
-            elif prev_close >= prev_ema9 and cmp_val < curr_ema9:
+                reason = "भाव ने 9 EMA को नीचे से ऊपर तोड़ा"
+            elif df['Close'].iloc[-2] >= ema9.iloc[-2] and cmp_val < ema9.iloc[-1]:
                 signal = "🔴 SELL (9 EMA Breakdown)"
                 reason = "भाव ने 9 EMA को ऊपर से नीचे तोड़ा"
 
+        # ---------------- 5. VWAP Breakout ----------------
         elif "VWAP" in strategy_name:
             typ = (df['High'] + df['Low'] + df['Close']) / 3
             vwap = (typ * df['Volume']).cumsum() / df['Volume'].cumsum()
             curr_vwap = float(vwap.iloc[-1])
             if cmp_val > curr_vwap and float(df['Close'].iloc[-2]) <= float(vwap.iloc[-2]):
                 signal = "🟢 BUY (VWAP Breakout)"
-                reason = f"VWAP (₹{curr_vwap:.1f}) के ऊपर निकला"
+                reason = f"VWAP (₹{curr_vwap:.1f}) के ऊपर ब्रेकआउट"
             elif cmp_val < curr_vwap and float(df['Close'].iloc[-2]) >= float(vwap.iloc[-2]):
                 signal = "🔴 SELL (VWAP Breakdown)"
-                reason = f"VWAP (₹{curr_vwap:.1f}) के नीचे फिसला"
+                reason = f"VWAP (₹{curr_vwap:.1f}) के नीचे ब्रेकडाउन"
 
-        elif "Heikin-Ashi" in strategy_name:
-            ha_close = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4.0
-            ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2.0]
-            for i in range(1, len(df)):
-                ha_open.append((ha_open[i-1] + ha_close.iloc[i-1]) / 2.0)
-            ha_open = pd.Series(ha_open, index=df.index)
-
-            c1_bull = ha_close.iloc[-1] > ha_open.iloc[-1]
-            c2_bull = ha_close.iloc[-2] > ha_open.iloc[-2]
-            c3_bull = ha_close.iloc[-3] > ha_open.iloc[-3]
-            
-            c1_bear = ha_close.iloc[-1] < ha_open.iloc[-1]
-            c2_bear = ha_close.iloc[-2] < ha_open.iloc[-2]
-            c3_bear = ha_close.iloc[-3] < ha_open.iloc[-3]
-
-            if c1_bull and c2_bull and c3_bull:
-                signal = "🟢 BUY (3 Green HA)"
-                reason = "लगातार 3 मजबूत बुलिश HA कैंडल्स"
-            elif c1_bear and c2_bear and c3_bear:
-                signal = "🔴 SELL (3 Red HA)"
-                reason = "लगातार 3 मजबूत बेयरिश HA कैंडल्स"
-
-        if "BUY" in signal or "SELL" in signal:
+        if "BUY" in signal or "SELL" in signal or "BEARISH" in signal:
             return {
                 "शेयर": symbol,
                 "सिग्नल": signal,
@@ -546,7 +645,7 @@ def scan_stock_strategy(item, strategy_name):
         pass
     return None
 
-# ================= 9. Dynamic Strikes Engine =================
+# ================= 10. Dynamic Strikes & Chart Engine (Lens Enabled) =================
 def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
     atm = round(cmp_val / step) * step
     strikes = []
@@ -554,49 +653,17 @@ def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
         strikes.append(int(atm + (i * step)))
     return strikes, atm
 
-# ================= 10. Chart Engine (Lens Zoom Enabled) =================
-def compute_heikin_ashi(df):
-    ha = pd.DataFrame(index=df.index)
-    ha['Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4.0
-    ha_open = np.zeros(len(df))
-    ha_open[0] = (df['Open'].iloc[0] + df['Close'].iloc[0]) / 2.0
-    for i in range(1, len(df)):
-        ha_open[i] = (ha_open[i-1] + ha['Close'].iloc[i-1]) / 2.0
-    ha['Open'] = ha_open
-    ha['High'] = pd.concat([df['High'], ha['Open'], ha['Close']], axis=1).max(axis=1)
-    ha['Low'] = pd.concat([df['Low'], ha['Open'], ha['Close']], axis=1).min(axis=1)
-    return ha
-
 def render_zoomable_chart(symbol, yf_ticker):
-    tf = st.session_state.get("chart_tf", "5m")
-    ctype = st.session_state.get("chart_type", "Regular Candlestick")
+    tf = st.session_state.get("chart_tf", "3m")
+    ctype = st.session_state.get("chart_type", "Heikin-Ashi (हेइकिन-आशी)")
     show_ema = st.session_state.get("chart_show_ema", True)
     zoom_level = st.session_state.get("chart_zoom_level", 0)
 
-    tf_params = {
-        "1m": {"period": "2d", "interval": "1m"},
-        "5m": {"period": "5d", "interval": "5m"},
-        "15m": {"period": "10d", "interval": "15m"},
-        "1h": {"period": "1mo", "interval": "60m"},
-        "1d": {"period": "6mo", "interval": "1d"}
-    }
-    cfg = tf_params.get(tf, {"period": "5d", "interval": "5m"})
-
     try:
-        data = yf.download(yf_ticker, period=cfg["period"], interval=cfg["interval"], progress=False)
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-            
+        data = load_and_resample_ohlc(yf_ticker, tf)
         if data.empty or len(data) < 2:
             st.info(f"{symbol}: चार्ट डेटा फेच हो रहा है...")
             return
-
-        if tf in ["1m", "5m", "15m"]:
-            if data.index.tz is not None:
-                data.index = data.index.tz_convert("Asia/Kolkata")
-            else:
-                data.index = data.index.tz_localize("UTC").tz_convert("Asia/Kolkata")
-            data = data.between_time('09:15', '15:40')
 
         last_close = float(data['Close'].iloc[-1])
         first_open = float(data['Open'].iloc[0])
@@ -615,7 +682,6 @@ def render_zoomable_chart(symbol, yf_ticker):
 
         ema9 = plot_df['Close'].ewm(span=9, adjust=False).mean()
 
-        # लेंस ज़ूम लॉजिक (अंतिम N कैंडल्स दिखाना)
         if zoom_level > 0:
             candles_to_show = max(15, len(plot_df) - (zoom_level * 25))
             start_x = plot_df.index[-candles_to_show]
@@ -660,13 +726,12 @@ def render_zoomable_chart(symbol, yf_ticker):
             legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
         )
 
-        # रेंजस्लाइडर (लेंस स्लाइडर) एक्टिव करें
         fig.update_xaxes(
             rangeslider=dict(visible=True, thickness=0.06),
             range=x_range
         )
 
-        if tf in ["1m", "5m", "15m"]:
+        if tf in ["1m", "3m", "5m", "15m"]:
             fig.update_xaxes(
                 rangebreaks=[
                     dict(bounds=["sat", "mon"]),
@@ -678,16 +743,10 @@ def render_zoomable_chart(symbol, yf_ticker):
         st.plotly_chart(
             fig,
             use_container_width=True,
-            config={
-                "scrollZoom": False,
-                "displayModeBar": False,
-                "doubleClick": "reset",
-                "showTips": False
-            }
+            config={"scrollZoom": False, "displayModeBar": False, "doubleClick": "reset", "showTips": False}
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 🔍 चार्ट के ठीक नीचे लेंस कंट्रोल्स
         col_lens1, col_lens2, col_lens3 = st.columns(3)
         with col_lens1:
             if st.button("🔍➕ ज़ूम इन (Lens In)", use_container_width=True, key="btn_lens_in"):
@@ -891,8 +950,8 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
                 
             st.selectbox(
                 "टाइमफ्रेम बदलें:",
-                ["1m", "5m", "15m", "1h", "1d"],
-                index=["1m", "5m", "15m", "1h", "1d"].index(st.session_state["chart_tf"]),
+                ["1m", "3m", "5m", "15m", "1h", "1d"],
+                index=["1m", "3m", "5m", "15m", "1h", "1d"].index(st.session_state.get("chart_tf", "3m")),
                 key="top_tf_key",
                 on_change=on_top_tf_change,
                 label_visibility="collapsed"
@@ -900,16 +959,18 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
 
         render_zoomable_chart(target_asset, meta_info["yf"])
 
-# ================= 12. F&O LIVE STRATEGY SCANNER =================
-with st.expander("🎯 F&O लाइव स्ट्रैटेजी स्कैनर (सभी शेयरों पर एक साथ सिग्नल खोजें)", expanded=False):
+# ================= 12. F&O LIVE STRATEGY SCANNER (Option Buying Enabled) =================
+with st.expander("🎯 F&O लाइव स्ट्रैटेजी स्कैनर (Stock Option Buying & Momemtum)", expanded=False):
     c_strat1, c_strat2 = st.columns([2, 1])
     with c_strat1:
         selected_strategy = st.selectbox(
             "रनिंग स्ट्रैटेजी चुनें:",
             [
-                "⚡ 9 EMA ब्रेकआउट / रिवर्सल (Scalp & Intraday)",
-                "🌊 VWAP मोमेंटम ब्रेकआउट (Institutional Trend)",
-                "🔥 Heikin-Ashi 3-कैंडल ट्रेंड स्ट्रीक (Strong Trend)"
+                "🚀 PDH / PDL ब्रेकआउट + 2x वॉल्यूम ब्लास्ट (High Probability Option Buying)",
+                "⚡ Open = Low (CE Buy) / Open = High (PE Buy) मोमेंटम स्कैनर",
+                "🔥 3-Minute Heikin-Ashi 3-Candle Streak (Green=Entry / Red=Bearish)",
+                "📈 9 EMA ब्रेकआउट / रिवर्सल (Scalp & Intraday)",
+                "🌊 VWAP मोमेंटम ब्रेकआउट (Institutional Trend)"
             ]
         )
     with c_strat2:
@@ -918,7 +979,7 @@ with st.expander("🎯 F&O लाइव स्ट्रैटेजी स्क
         btn_scan = st.button("🚀 सभी F&O स्टॉक्स पर स्ट्रैटेजी रन करें", use_container_width=True, type="primary")
 
     if btn_scan:
-        with st.spinner(f"सभी {len(FNO_DATABASE)} F&O स्टॉक्स पर स्ट्रैटेजी स्कैन हो रही है..."):
+        with st.spinner(f"सभी F&O स्टॉक्स पर {selected_strategy} स्कैन हो रही है..."):
             signals_found = []
             with ThreadPoolExecutor(max_workers=10) as executor:
                 results = executor.map(lambda itm: scan_stock_strategy(itm, selected_strategy), list(FNO_DATABASE.items())[:35])
@@ -1063,3 +1124,123 @@ with st.expander("🎯 भाग 6: बड़े ब्रोकरेज हा
                     call = "🟢 खरीदारी (Buy)" if any(w in tl for w in ["buy", "raised", "upgrade"]) else ("🔴 बिकवाली (Sell)" if any(w in tl for w in ["sell", "cut", "downgrade"]) else "⚪ अपडेट")
                     st.markdown(f"**[{call}]** `{b['stock']}` | [{b['title']}]({b['link']})")
                     st.divider()
+
+# ================= 15. PURE TWITTER & NEWS ONLY SENTIMENT SCANNER =================
+st.write("---")
+st.subheader("🐦 केवल Twitter & News सेंटीमेंट स्कैनर (Top 5 Bullish vs Bearish)")
+
+with st.expander("📰 केवल ताज़ा सोशल मीडिया व खबरों के आधार पर टॉप 5 स्टॉक्स", expanded=False):
+    st.write("**यहाँ तकनीकी इंडिकेटर्स नहीं, बल्कि केवल ताज़ा खबरों और Twitter/X पल्स के आधार पर रैंकिंग होती है:**")
+    pure_limit = st.slider("स्कैन करने के लिए स्टॉक्स की संख्या (News Only):", min_value=10, max_value=len(ALL_FNO_STOCKS), value=20, step=5, key="pure_news_slider")
+    
+    if st.button("⚡ केवल Twitter और News पर आधारित टॉप 5 खोजें", use_container_width=True, key="btn_pure_news"):
+        with st.spinner(f"{pure_limit} शेयरों की ताज़ा खबरों और Twitter पल्स का विश्लेषण हो रहा है..."):
+            news_results = []
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                res = executor.map(analyze_stock_pure_sentiment, ALL_FNO_STOCKS[:pure_limit])
+                for r in res:
+                    if r: news_results.append(r)
+            if news_results:
+                ndf = pd.DataFrame(news_results)
+                sorted_ndf = ndf.sort_values(by="सोशल/न्यूज़ स्कोर", ascending=False)
+                st.session_state["pure_news_data"] = sorted_ndf
+
+    if st.session_state.get("pure_news_data") is not None:
+        ndf_saved = st.session_state["pure_news_data"]
+        col_n1, col_n2 = st.columns(2)
+        with col_n1:
+            st.success("🟢 **शीर्ष 5 बुलिश स्टॉक्स (Positive News & Tweets)**")
+            st.dataframe(ndf_saved.head(5), use_container_width=True, hide_index=True)
+        with col_n2:
+            st.error("🔴 **शीर्ष 5 बेयरिश स्टॉक्स (Negative News & Tweets)**")
+            st.dataframe(ndf_saved.tail(5).iloc[::-1], use_container_width=True, hide_index=True)
+
+# ================= 16. SINGLE STOCK 360° DEEP DIVE RESEARCH =================
+st.write("---")
+st.subheader("🔎 किसी खास स्टॉक का 360° डीप रिसर्च (All Strategies & News)")
+
+with st.expander("📌 किसी भी एक शेयर का पूरा पोस्टमार्टम (सारी स्ट्रैटेजीज़ + ऑल न्यूज़)", expanded=True):
+    c_srch1, c_srch2 = st.columns([1.5, 1])
+    with c_srch1:
+        chosen_deep_stock = st.selectbox("जिस शेयर का पूरा रिसर्च देखना है उसे चुनें:", ALL_FNO_STOCKS, index=ALL_FNO_STOCKS.index("HDFCBANK") if "HDFCBANK" in ALL_FNO_STOCKS else 0)
+    with c_srch2:
+        st.write("")
+        st.write("")
+        btn_deep_run = st.button("🚀 इस शेयर का पूरा रिसर्च लोड करें", type="primary", use_container_width=True)
+
+    if btn_deep_run or "deep_res_done" in st.session_state:
+        st.session_state["deep_res_done"] = True
+        deep_ticker = f"{chosen_deep_stock}.NS"
+        
+        with st.spinner(f"{chosen_deep_stock} का लाइव विश्लेषण लोड हो रहा है..."):
+            df_3m = load_and_resample_ohlc(deep_ticker, "3m")
+            df_daily = yf.download(deep_ticker, period="3mo", interval="1d", progress=False)
+            if isinstance(df_daily.columns, pd.MultiIndex):
+                df_daily.columns = df_daily.columns.get_level_values(0)
+
+            if not df_daily.empty:
+                cmp_now = round(float(df_daily['Close'].iloc[-1]), 2)
+                prev_cl = round(float(df_daily['Close'].iloc[-2]), 2)
+                chg = round(((cmp_now - prev_cl) / prev_cl) * 100, 2)
+                pdh_val = round(float(df_daily['High'].iloc[-2]), 2)
+                pdl_val = round(float(df_daily['Low'].iloc[-2]), 2)
+                ema20_val = round(float(df_daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
+
+                strat_report = []
+                
+                # 1. PDH / PDL Breakout
+                if cmp_now > pdh_val:
+                    strat_report.append({"स्ट्रैटेजी": "PDH ब्रेकआउट", "स्टेटस": "🟢 BULLISH (Previous Day High ब्रेक हुआ)"})
+                elif cmp_now < pdl_val:
+                    strat_report.append({"स्ट्रैटेजी": "PDL ब्रेकडाउन", "स्टेटस": "🔴 BEARISH (Previous Day Low टूटा)"})
+                else:
+                    strat_report.append({"स्ट्रैटेजी": "PDH/PDL रेंज", "स्टेटस": "⚪ Inside Yesterday's Range"})
+
+                # 2. 20 EMA Daily
+                if cmp_now >= ema20_val:
+                    strat_report.append({"स्ट्रैटेजी": "20 EMA (Daily Trend)", "स्टेटस": f"🟢 BULLISH (₹{ema20_val} के ऊपर)"})
+                else:
+                    strat_report.append({"स्ट्रैटेजी": "20 EMA (Daily Trend)", "स्टेटस": f"🔴 BEARISH (₹{ema20_val} के नीचे)"})
+
+                # 3. 3-Min Heikin-Ashi Streak
+                if not df_3m.empty and len(df_3m) >= 3:
+                    ha_temp = compute_heikin_ashi(df_3m)
+                    if ha_temp['Close'].iloc[-1] > ha_temp['Open'].iloc[-1] and ha_temp['Close'].iloc[-2] > ha_temp['Open'].iloc[-2] and ha_temp['Close'].iloc[-3] > ha_temp['Open'].iloc[-3]:
+                        strat_report.append({"स्ट्रैटेजी": "3-Min HA 3-Streak", "स्टेटस": "🟢 ENTRY ACTIVE (3 Green Candles)"})
+                    elif ha_temp['Close'].iloc[-1] < ha_temp['Open'].iloc[-1] and ha_temp['Close'].iloc[-2] < ha_temp['Open'].iloc[-2] and ha_temp['Close'].iloc[-3] < ha_temp['Open'].iloc[-3]:
+                        strat_report.append({"स्ट्रैटेजी": "3-Min HA 3-Streak", "स्टेटस": "🔴 BEARISH ACTIVE (3 Red Candles)"})
+                    else:
+                        strat_report.append({"स्ट्रैटेजी": "3-Min HA 3-Streak", "स्टेटस": "⚪ कोई स्ट्रीक नहीं"})
+
+                # 4. VWAP
+                if not df_3m.empty and 'Volume' in df_3m and df_3m['Volume'].sum() > 0:
+                    typ = (df_3m['High'] + df_3m['Low'] + df_3m['Close']) / 3
+                    vwap_val = round(float((typ * df_3m['Volume']).sum() / df_3m['Volume'].sum()), 2)
+                    if cmp_now >= vwap_val:
+                        strat_report.append({"स्ट्रैटेजी": "Intraday VWAP", "स्टेटस": f"🟢 BULLISH (VWAP ₹{vwap_val} के ऊपर)"})
+                    else:
+                        strat_report.append({"स्ट्रैटेजी": "Intraday VWAP", "स्टेटस": f"🔴 BEARISH (VWAP ₹{vwap_val} के नीचे)"})
+
+                # 5. 9 EMA 3-Min
+                if not df_3m.empty and len(df_3m) >= 9:
+                    ema9_3m = round(float(df_3m['Close'].ewm(span=9, adjust=False).mean().iloc[-1]), 2)
+                    if cmp_now >= ema9_3m:
+                        strat_report.append({"स्ट्रैटेजी": "9 EMA (3-Min)", "स्टेटस": f"🟢 BULLISH (₹{ema9_3m} के ऊपर)"})
+                    else:
+                        strat_report.append({"स्ट्रैटेजी": "9 EMA (3-Min)", "स्टेटस": f"🔴 BEARISH (₹{ema9_3m} के नीचे)"})
+
+                c_card1, c_card2 = st.columns([1, 1])
+                with c_card1:
+                    st.markdown(f"#### 📊 {chosen_deep_stock} तकनीकी व स्ट्रैटेजी रिपोर्ट")
+                    st.caption(f"CMP: ₹{cmp_now} ({'+' if chg > 0 else ''}{chg}%) | PDH: ₹{pdh_val} | PDL: ₹{pdl_val}")
+                    st.dataframe(pd.DataFrame(strat_report), use_container_width=True, hide_index=True)
+
+                with c_card2:
+                    st.markdown(f"#### 📰 {chosen_deep_stock} से जुड़ी सभी ताज़ा खबरें व रिपोर्ट्स")
+                    stock_news = fetch_rss_feed(f"{chosen_deep_stock}+share+India", limit=6)
+                    if stock_news:
+                        for sn in stock_news:
+                            st.markdown(f"• [{sn['title']}]({sn['link']})")
+                            st.caption(f"तारीख: {sn['date']}")
+                    else:
+                        st.info("इस शेयर पर कोई हालिया बड़ी खबर नहीं मिली।")
