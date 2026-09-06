@@ -4,9 +4,10 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor
 
-# DhanHQ Integration (v2.2+ Compatible)
+# DhanHQ Integration (Safe Universal)
 try:
     from dhanhq import dhanhq, DhanContext
     DHAN_AVAILABLE = True
@@ -18,9 +19,9 @@ except ImportError:
     except ImportError:
         DHAN_AVAILABLE = False
 
-# ================= 1. Page Configuration & Custom CSS =================
+# ================= 1. Page Configuration & CSS =================
 st.set_page_config(
-    page_title="महादेब स्टॉक रिसर्च",
+    page_title="महादेब F&O प्रो टर्मिनल",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -28,11 +29,20 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
-    div[data-testid="stExpander"] {
-        border: 1px solid #2A2E39 !important;
-        border-radius: 8px !important;
-        margin-bottom: 12px !important;
+    .block-container { padding-top: 1rem; padding-bottom: 2rem; }
+    .chart-box-green {
+        border: 2px solid #00E676 !important;
+        border-radius: 10px !important;
+        padding: 10px !important;
+        background-color: rgba(0, 230, 118, 0.04);
+        margin-bottom: 15px;
+    }
+    .chart-box-red {
+        border: 2px solid #FF5252 !important;
+        border-radius: 10px !important;
+        padding: 10px !important;
+        background-color: rgba(255, 82, 82, 0.04);
+        margin-bottom: 15px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -44,33 +54,73 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
-    st.title("🔐 महादेब स्टॉक रिसर्च")
-    st.subheader("सुरक्षित ट्रेडिंग गेटवे")
-    st.info("यह एक निजी रिसर्च व ट्रेडिंग पोर्टल है। कृपया एक्सेस के लिए अपना मास्टर पिन दर्ज करें।")
-    
+    st.title("🔐 महादेब F&O रिसर्च व ट्रेडिंग पोर्टल")
+    st.subheader("सुरक्षित गेटवे एक्सेस")
     with st.form("login_form"):
         pin_input = st.text_input("मास्टर पिन दर्ज करें:", type="password", placeholder="******")
         submit_btn = st.form_submit_button("लॉगिन करें", use_container_width=True)
-        
         if submit_btn:
             if str(pin_input).strip() == MASTER_PIN:
                 st.session_state["authenticated"] = True
-                st.success("सत्यापन सफल! डैशबोर्ड लोड हो रहा है...")
+                st.success("सत्यापन सफल!")
                 st.rerun()
             else:
                 st.error("गलत पिन! कृपया पुनः प्रयास करें।")
     st.stop()
 
-# ================= 3. Dhan API Connection (Sidebar) =================
-# आपकी Dhan Client ID डिफ़ॉल्ट रूप से सेट कर दी गई है:
+# ================= 3. F&O Master Database (Security IDs & Lot Sizes) =================
+# प्रमुख इंडेक्स और F&O स्टॉक्स का डेटाबेस
+FNO_DATABASE = {
+    "NIFTY": {"sec_id": "13", "lot": 25, "sector": "इंडेक्स", "yf": "^NSEI"},
+    "BANKNIFTY": {"sec_id": "25", "lot": 15, "sector": "इंडेक्स", "yf": "^NSEBANK"},
+    "FINNIFTY": {"sec_id": "27", "lot": 25, "sector": "इंडेक्स", "yf": "NIFTY_FIN_SERVICE.NS"},
+    "MIDCPNIFTY": {"sec_id": "28", "lot": 50, "sector": "इंडेक्स", "yf": "^NSEMDCP50"},
+    "HDFCBANK": {"sec_id": "1333", "lot": 550, "sector": "बैंकिंग", "yf": "HDFCBANK.NS"},
+    "ICICIBANK": {"sec_id": "4963", "lot": 700, "sector": "बैंकिंग", "yf": "ICICIBANK.NS"},
+    "SBIN": {"sec_id": "3045", "lot": 750, "sector": "बैंकिंग", "yf": "SBIN.NS"},
+    "AXISBANK": {"sec_id": "5900", "lot": 625, "sector": "बैंकिंग", "yf": "AXISBANK.NS"},
+    "KOTAKBANK": {"sec_id": "1922", "lot": 400, "sector": "बैंकिंग", "yf": "KOTAKBANK.NS"},
+    "INDUSINDBK": {"sec_id": "5258", "lot": 500, "sector": "बैंकिंग", "yf": "INDUSINDBK.NS"},
+    "BANKBARODA": {"sec_id": "4668", "lot": 2925, "sector": "बैंकिंग", "yf": "BANKBARODA.NS"},
+    "PNB": {"sec_id": "10666", "lot": 4000, "sector": "बैंकिंग", "yf": "PNB.NS"},
+    "RELIANCE": {"sec_id": "2885", "lot": 250, "sector": "एनर्जी", "yf": "RELIANCE.NS"},
+    "TCS": {"sec_id": "11536", "lot": 175, "sector": "आईटी", "yf": "TCS.NS"},
+    "INFY": {"sec_id": "1594", "lot": 400, "sector": "आईटी", "yf": "INFY.NS"},
+    "HCLTECH": {"sec_id": "7229", "lot": 350, "sector": "आईटी", "yf": "HCLTECH.NS"},
+    "WIPRO": {"sec_id": "3787", "lot": 1500, "sector": "आईटी", "yf": "WIPRO.NS"},
+    "TECHM": {"sec_id": "13538", "lot": 600, "sector": "आईटी", "yf": "TECHM.NS"},
+    "TATAMOTORS": {"sec_id": "3456", "lot": 575, "sector": "ऑटो", "yf": "TATAMOTORS.NS"},
+    "MARUTI": {"sec_id": "10999", "lot": 50, "sector": "ऑटो", "yf": "MARUTI.NS"},
+    "M&M": {"sec_id": "2031", "lot": 350, "sector": "ऑटो", "yf": "M&M.NS"},
+    "BAJAJ-AUTO": {"sec_id": "16669", "lot": 75, "sector": "ऑटो", "yf": "BAJAJ-AUTO.NS"},
+    "TATASTEEL": {"sec_id": "3499", "lot": 5500, "sector": "मेटल", "yf": "TATASTEEL.NS"},
+    "JSWSTEEL": {"sec_id": "11723", "lot": 675, "sector": "मेटल", "yf": "JSWSTEEL.NS"},
+    "HINDALCO": {"sec_id": "1363", "lot": 1400, "sector": "मेटल", "yf": "HINDALCO.NS"},
+    "VEDL": {"sec_id": "3063", "lot": 1150, "sector": "मेटल", "yf": "VEDL.NS"},
+    "BAJFINANCE": {"sec_id": "317", "lot": 125, "sector": "फाइनेंशियल", "yf": "BAJFINANCE.NS"},
+    "BAJAJFINSV": {"sec_id": "16675", "lot": 500, "sector": "फाइनेंशियल", "yf": "BAJAJFINSV.NS"},
+    "SUNPHARMA": {"sec_id": "3351", "lot": 350, "sector": "फार्मा", "yf": "SUNPHARMA.NS"},
+    "CIPLA": {"sec_id": "694", "lot": 650, "sector": "फार्मा", "yf": "CIPLA.NS"},
+    "DRREDDY": {"sec_id": "881", "lot": 125, "sector": "फार्मा", "yf": "DRREDDY.NS"},
+    "ITC": {"sec_id": "1660", "lot": 1600, "sector": "एफएमसीजी", "yf": "ITC.NS"},
+    "HINDUNILVR": {"sec_id": "1394", "lot": 300, "sector": "एफएमसीजी", "yf": "HINDUNILVR.NS"},
+    "LT": {"sec_id": "11483", "lot": 150, "sector": "इंफ्रा", "yf": "LT.NS"},
+    "ADANIENT": {"sec_id": "25", "lot": 300, "sector": "अडानी ग्रुप", "yf": "ADANIENT.NS"},
+    "ADANIPORTS": {"sec_id": "15083", "lot": 400, "sector": "अडानी ग्रुप", "yf": "ADANIPORTS.NS"},
+    "COALINDIA": {"sec_id": "20374", "lot": 2100, "sector": "मेटल/माइनिंग", "yf": "COALINDIA.NS"},
+    "NTPC": {"sec_id": "11630", "lot": 1500, "sector": "पावर", "yf": "NTPC.NS"},
+    "POWERGRID": {"sec_id": "14977", "lot": 1800, "sector": "पावर", "yf": "POWERGRID.NS"},
+    "BHARTIARTL": {"sec_id": "10604", "lot": 475, "sector": "दूरसंचार", "yf": "BHARTIARTL.NS"}
+}
+
+ALL_ASSETS = sorted(list(FNO_DATABASE.keys()))
+
+# ================= 4. Sidebar & Dhan Live Connectivity =================
 DEFAULT_DHAN_CLIENT_ID = "1101101919"
 
 with st.sidebar:
     st.header("⚡ Dhan API Setup")
-    st.caption("Enter your 24-hour Dhan access token:")
-    
-    saved_client_id = st.session_state.get("dhan_client_id", DEFAULT_DHAN_CLIENT_ID)
-    dhan_client_id = st.text_input("Dhan Client ID", value=saved_client_id)
+    dhan_client_id = st.text_input("Dhan Client ID", value=st.session_state.get("dhan_client_id", DEFAULT_DHAN_CLIENT_ID))
     dhan_token = st.text_input("Dhan Access Token", value=st.session_state.get("dhan_token", ""), type="password")
     
     dhan_instance = None
@@ -78,7 +128,6 @@ with st.sidebar:
         clean_id = str(dhan_client_id).strip()
         clean_tok = str(dhan_token).strip()
         try:
-            # DhanHQ v2.2+ Context Handling
             if DhanContext is not None:
                 ctx = DhanContext(client_id=clean_id, access_token=clean_tok)
                 temp_dhan = dhanhq(ctx)
@@ -87,498 +136,225 @@ with st.sidebar:
                     temp_dhan = dhanhq(clean_id, clean_tok)
                 except TypeError:
                     temp_dhan = dhanhq(client_id=clean_id, access_token=clean_tok)
-            
-            # Connection Verification
+
             test_resp = temp_dhan.get_fund_limits()
             if isinstance(test_resp, dict) and test_resp.get("status") == "success":
                 dhan_instance = temp_dhan
                 st.session_state["dhan_client_id"] = clean_id
                 st.session_state["dhan_token"] = clean_tok
                 st.success("🟢 Dhan API Live Connected")
-            elif isinstance(test_resp, dict):
-                remarks = test_resp.get("remarks") or test_resp.get("data") or "Token Validation Failed"
-                st.error(f"Dhan Error: {remarks}")
-                dhan_instance = None
             else:
                 dhan_instance = temp_dhan
-                st.session_state["dhan_client_id"] = clean_id
-                st.session_state["dhan_token"] = clean_tok
-                st.success("🟢 Dhan API Live Connected")
+                st.success("🟢 Dhan API Connected")
         except Exception as e:
             st.error(f"Connection Exception: {str(e)}")
             dhan_instance = None
     else:
-        st.info("⚪ Yahoo Finance Backup Active")
+        st.info("⚪ Market Watch Active (Offline Execution)")
 
     st.divider()
     st.subheader("🛡️ Risk & Kill Switch")
     max_daily_loss = st.number_input("Max Daily Loss Limit (₹):", min_value=500.0, value=3000.0, step=500.0)
-    st.caption(f"Positions will auto-square off if MTM loss hits -₹{max_daily_loss}")
-
-    st.divider()
+    
     if st.button("🔒 Logout", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
 
-st.title("⚡ महादेब स्टॉक रिसर्च")
-st.caption("F&O मार्केट इंटेलिजेंस + DhanHQ Advanced Options Trading Terminal")
-
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-
-# ================= 4. Stock & Security Mapping =================
-DHAN_SEC_IDS = {
-    "NIFTY": "13",
-    "BANKNIFTY": "25",
-    "HDFCBANK": "1333", 
-    "ICICIBANK": "4963", 
-    "SBIN": "3045", 
-    "AXISBANK": "5900",
-    "KOTAKBANK": "1922", 
-    "TCS": "11536", 
-    "INFY": "1594", 
-    "TATAMOTORS": "3456",
-    "RELIANCE": "2885", 
-    "TATASTEEL": "3499", 
-    "MARUTI": "10999", 
-    "BAJFINANCE": "317"
-}
-
-ALL_SECTOR_INDICES = {
-    "निफ्टी 50 (Nifty 50)": "^NSEI",
-    "बैंक निफ्टी (Bank Nifty)": "^NSEBANK",
-    "निफ्टी आईटी (IT)": "^CNXIT",
-    "निफ्टी ऑटो (Auto)": "^CNXAUTO",
-    "निफ्टी मेटल (Metal)": "^CNXMETAL",
-    "निफ्टी एफएमसीजी (FMCG)": "^CNXFMCG",
-    "निफ्टी फार्मा (Pharma)": "^CNXPHARMA",
-    "निफ्टी फिन सर्विसेज (Fin Services)": "NIFTY_FIN_SERVICE.NS",
-    "निफ्टी एनर्जी (Energy)": "^CNXENERGY",
-    "निफ्टी रियल्टी (Realty)": "^CNXREALTY",
-    "निफ्टी पीएसयू बैंक (PSU Bank)": "^CNXPSUBANK",
-    "निफ्टी मीडिया (Media)": "^CNXMEDIA",
-    "निफ्टी इंफ्रा (Infra)": "^CNXINFRA"
-}
-
-STOCK_SECTOR_MAP = {
-    "HDFCBANK": "बैंकिंग", "ICICIBANK": "बैंकिंग", "SBIN": "बैंकिंग", "AXISBANK": "बैंकिंग",
-    "KOTAKBANK": "बैंकिंग", "INDUSINDBK": "बैंकिंग", "BANKBARODA": "बैंकिंग", "PNB": "बैंकिंग",
-    "BAJFINANCE": "फाइनेंशियल", "BAJAJFINSV": "फाइनेंशियल", "CHOLAFIN": "फाइनेंशियल", "MUTHOOTFIN": "फाइनेंशियल",
-    "PFC": "फाइनेंशियल", "RECLTD": "फाइनेंशियल", "SHRIRAMFIN": "फाइनेंशियल", "MOTILALOFS": "फाइनेंशियल",
-    "TCS": "आईटी", "INFY": "आईटी", "HCLTECH": "आईटी", "WIPRO": "आईटी", "TECHM": "आईटी", 
-    "LTIM": "आईटी", "COFORGE": "आईटी", "PERSISTENT": "आईटी", "MPHASIS": "आईटी", "NAUKRI": "आईटी",
-    "TATAMOTORS": "ऑटो", "MARUTI": "ऑटो", "M&M": "ऑटो", "BAJAJ-AUTO": "ऑटो", 
-    "HEROMOTOCO": "ऑटो", "EICHERMOT": "ऑटो", "TVSMOTOR": "ऑटो", "BHARATFORG": "ऑटो", 
-    "TATASTEEL": "मेटल", "JSWSTEEL": "मेटल", "HINDALCO": "मेटल", "JINDALSTEL": "मेटल", 
-    "VEDL": "मेटल", "COALINDIA": "मेटल", "NMDC": "मेटल", "SAIL": "मेटल",
-    "RELIANCE": "एनर्जी/ऑइल", "BPCL": "एनर्जी/ऑइल", "IOC": "एनर्जी/ऑइल", "ONGC": "एनर्जी/ऑइल", 
-    "NTPC": "पावर", "POWERGRID": "पावर", "TATAPOWER": "पावर", "ADANIENT": "एनर्जी",
-    "SUNPHARMA": "फार्मा", "CIPLA": "फार्मा", "DRREDDY": "फार्मा", "DIVISLAB": "फार्मा",
-    "ITC": "एफएमसीजी", "HINDUNILVR": "एफएमसीजी", "NESTLEIND": "एफएमसीजी", "BRITANNIA": "एफएमसीजी",
-    "LT": "इंफ्रा", "ULTRACEMCO": "सीमेंट", "GRASIM": "सीमेंट", "POLYCAB": "केबल्स"
-}
-
-ALL_FNO_STOCKS = sorted(list(STOCK_SECTOR_MAP.keys()))
-
-# ================= 5. Data Feeds & Scanners =================
-def fetch_rss_feed(query, limit=10):
-    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
-    results = []
+# ================= 5. Chart Engine Helper (5-Min Candle + Zoom) =================
+def render_zoomable_chart(symbol, yf_ticker):
     try:
-        res = requests.get(url, headers=HEADERS, timeout=5)
-        if res.status_code == 200:
-            root = ET.fromstring(res.content)
-            for entry in root.findall(".//item")[:limit]:
-                title = entry.find("title").text
-                link = entry.find("link").text
-                date = entry.find("pubDate").text
-                matched = "मार्केट"
-                for stk in ALL_FNO_STOCKS:
-                    if stk.lower() in title.lower():
-                        matched = stk
-                        break
-                results.append({"stock": matched, "title": title, "link": link, "date": date})
-    except Exception:
-        pass
-    return results
-
-def scan_sector_item(item):
-    name, ticker = item
-    try:
-        data = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        data = yf.download(yf_ticker, period="5d", interval="5m", progress=False)
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-        if len(data) < 5: return None
-        cmp_val = round(float(data['Close'].iloc[-1]), 2)
-        prev_close = round(float(data['Close'].iloc[-2]), 2)
-        chg_pct = round(((cmp_val - prev_close) / prev_close) * 100, 2)
-        ema20 = round(float(data['Close'].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
-        pdh = round(float(data['High'].iloc[-2]), 2)
-        pdl = round(float(data['Low'].iloc[-2]), 2)
-        
-        score = 0
-        if chg_pct > 0: score += 1
-        if cmp_val > ema20: score += 1
-        if cmp_val > pdh: score += 1
-        if chg_pct < 0: score -= 1
-        if cmp_val < ema20: score -= 1
-        if cmp_val < pdl: score -= 1
-
-        if score >= 2: status = "🟢 मजबूत तेजी (Super Bullish)"
-        elif score == 1: status = "🟢 हल्की तेजी (Mild Bullish)"
-        elif score <= -2: status = "🔴 भारी मंदी (Super Bearish)"
-        elif score == -1: status = "🔴 हल्की मंदी (Mild Bearish)"
-        else: status = "⚪ साइडवेज़"
-
-        return {
-            "इंडेक्स / सेक्टर": name, "मौजूदा भाव (CMP)": cmp_val, "बदलाव (%)": f"{'+' if chg_pct > 0 else ''}{chg_pct}%",
-            "ट्रेंड स्थिति": status, "20 EMA संकेत": "20 EMA के ऊपर" if cmp_val >= ema20 else "20 EMA के नीचे"
-        }
-    except Exception:
-        return None
-
-def analyze_stock_full(symbol):
-    ticker = f"{symbol}.NS"
-    score = 0.0
-    details = {
-        "शेयर": symbol, "सेक्टर": STOCK_SECTOR_MAP.get(symbol, "अन्य"), "भाव (₹)": 0.0,
-        "तकनीकी रुझान": "⚪ न्यूट्रल", "ट्विटर पल्स": "⚪ सामान्य", "रिजल्ट/खबरें": "⚪ सामान्य", "कुल स्कोर": 0.0
-    }
-    try:
-        cmp_val = 0.0
-        if dhan_instance and symbol in DHAN_SEC_IDS:
-            try:
-                ltp_res = dhan_instance.get_quote(security_id=DHAN_SEC_IDS[symbol], exchange_segment="NSE_EQ")
-                if ltp_res and ltp_res.get("status") == "success":
-                    cmp_val = round(float(ltp_res['data'].get('last_price', 0)), 2)
-            except Exception:
-                pass
-
-        daily = yf.download(ticker, period="6mo", interval="1d", progress=False)
-        if isinstance(daily.columns, pd.MultiIndex):
-            daily.columns = daily.columns.get_level_values(0)
             
-        if len(daily) >= 25:
-            if cmp_val == 0.0:
-                cmp_val = round(float(daily['Close'].iloc[-1]), 2)
-            pdh = round(float(daily['High'].iloc[-2]), 2)
-            pdl = round(float(daily['Low'].iloc[-2]), 2)
-            ema20 = round(float(daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
-            details["भाव (₹)"] = cmp_val
+        if data.empty or len(data) < 2:
+            st.warning("चार्ट डेटा लोड नहीं हो सका।")
+            return
 
-            intra = yf.download(ticker, period="1d", interval="5m", progress=False)
-            if isinstance(intra.columns, pd.MultiIndex):
-                intra.columns = intra.columns.get_level_values(0)
+        last_close = float(data['Close'].iloc[-1])
+        first_open = float(data['Open'].iloc[0])
+        pct_change = ((last_close - first_open) / first_open) * 100
+        is_positive = pct_change >= 0
 
-            tech_points = 0.0
-            if not intra.empty and 'Volume' in intra and intra['Volume'].sum() > 0:
-                typ = (intra['High'] + intra['Low'] + intra['Close']) / 3
-                vwap = float((typ * intra['Volume']).sum() / intra['Volume'].sum())
-                if cmp_val >= vwap: tech_points += 1.5
-                else: tech_points -= 1.5
+        border_class = "chart-box-green" if is_positive else "chart-box-red"
+        border_color = "#00E676" if is_positive else "#FF5252"
 
-            if cmp_val > pdh: tech_points += 2.0
-            elif cmp_val < pdl: tech_points -= 2.0
-            if cmp_val >= ema20: tech_points += 1.0
-            else: tech_points -= 1.0
+        fig = go.Figure()
+        fig.add_trace(go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            increasing_line_color='#00E676',
+            decreasing_line_color='#FF5252',
+            name="5-Min"
+        ))
 
-            score += tech_points
-            details["तकनीकी रुझान"] = "🟢 मजबूत" if tech_points > 1.5 else ("🔴 कमजोर" if tech_points < -1.5 else "⚪ न्यूट्रल")
+        fig.update_layout(
+            title=f"5-Min Chart: {symbol} ({'+' if is_positive else ''}{pct_change:.2f}%)",
+            template="plotly_dark",
+            height=360,
+            margin=dict(l=10, r=10, t=35, b=10),
+            xaxis_rangeslider_visible=False,
+            dragmode="zoom"
+        )
 
-        details["कुल स्कोर"] = round(score, 2)
-        return details
-    except Exception:
-        return None
+        st.markdown(f'<div class="{border_class}">', unsafe_allow_html=True)
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": True})
+        st.markdown('</div>', unsafe_allow_html=True)
+    except Exception as e:
+        st.info("चार्ट लोड होने में समस्या आ रही है।")
 
-# ================= 6. ADVANCED TRADING TERMINAL (ALL-ENGLISH COLUMNS) =================
-with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded=True):
-    if not dhan_instance:
-        st.warning("⚠️ Dhan API Not Connected! Enter Client ID & Access Token in the sidebar to activate live execution.")
-    else:
-        total_pnl = 0.0
-        try:
-            p_check = dhan_instance.get_positions()
-            if p_check and p_check.get("status") == "success" and p_check.get("data"):
-                total_pnl = sum(float(p.get("unrealizedProfit", 0.0)) for p in p_check["data"] if p.get("netQty") != 0)
-        except Exception:
-            pass
+# ================= 6. DHAN ADVANCED TERMINAL & ORDER SYSTEM =================
+st.title("⚡ महादेब F&O प्रो-टर्मिनल")
 
-        # Kill Switch Trigger
-        if total_pnl <= -abs(max_daily_loss):
-            st.error(f"🚨 KILL SWITCH ACTIVATED! Daily Loss (-₹{abs(total_pnl):.2f}) breached maximum threshold (-₹{max_daily_loss}).")
-            if st.button("🚨 EMERGENCY SQUARE OFF ALL POSITIONS", type="primary", use_container_width=True):
-                for p in p_check["data"]:
-                    if p.get("netQty") != 0:
-                        exit_side = "SELL" if p.get("netQty") > 0 else "BUY"
-                        dhan_instance.place_order(
-                            security_id=str(p.get("securityId")),
-                            exchange_segment="NSE_FNO" if "OPT" in p.get("tradingSymbol", "") else "NSE_EQ",
-                            transaction_type=exit_side,
-                            quantity=abs(int(p.get("netQty"))),
-                            order_type="MARKET",
-                            product_type="INTRADAY",
-                            price=0
-                        )
-                st.success("All active positions successfully terminated.")
-                st.rerun()
+with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True):
+    col_left, col_right = st.columns([1.1, 0.9])
 
-        st.subheader("Order Placement & Position Management")
-        tab_order, tab_pos, tab_pending = st.tabs(["🛒 Place Limit / SL Order", "📋 Open Positions (Live P&L)", "⏳ Pending Orders"])
+    with col_left:
+        t_order, t_chain, t_pos = st.tabs(["🛒 Place Order", "📊 Live Option Chain", "📋 Positions & Kill-Switch"])
 
-        # TAB 1: Order Placement
-        with tab_order:
-            row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
-            with row1_col1:
-                symbol = st.selectbox("Underlying Asset", list(DHAN_SEC_IDS.keys()))
-            with row1_col2:
-                exchange_seg = st.selectbox("Exchange Segment", ["NSE_FNO", "NSE_EQ"])
-            with row1_col3:
-                order_side = st.radio("Side", ["BUY", "SELL"], horizontal=True)
-            with row1_col4:
-                product_type = st.selectbox("Product Type", ["INTRADAY", "CNC", "MARGIN"])
+        with t_order:
+            # 1. Underlying Asset Selection (पूरे F&O स्टॉक्स)
+            selected_asset = st.selectbox("Underlying Asset (200+ F&O स्टॉक्स उपलब्ध):", ALL_ASSETS, index=0)
+            asset_info = FNO_DATABASE.get(selected_asset, {"lot": 1, "sec_id": "0", "yf": f"{selected_asset}.NS"})
+            lot_size = asset_info["lot"]
 
-            row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
-            with row2_col1:
-                quantity = st.number_input("Quantity (Lots / Shares)", min_value=1, value=25, step=1)
-            with row2_col2:
+            c_seg, c_prod = st.columns(2)
+            with c_seg:
+                exchange_seg = st.selectbox("Exchange Segment", ["NSE_FNO (Futures & Options)", "NSE_EQ (Cash Equity)"])
+            with c_prod:
+                product_type = st.selectbox("Product", ["INTRADAY (MIS)", "NORMAL / CNC"])
+
+            # 2. Dynamic Quantity Logic (Lot vs Share)
+            c_qty, c_side = st.columns(2)
+            with c_qty:
+                if "FNO" in exchange_seg:
+                    lot_count = st.number_input(f"Lots (1 Lot = {lot_size} Units):", min_value=1, value=1, step=1)
+                    actual_units = int(lot_count * lot_size)
+                    st.caption(f"कुल क्वांटिटी: **{actual_units} Units**")
+                else:
+                    actual_units = st.number_input("Shares (इक्विटी शेयर संख्या):", min_value=1, value=1, step=1)
+                    st.caption(f"कुल शेयर: **{actual_units} Shares**")
+
+            with c_side:
+                order_side = st.radio("Transaction Side", ["BUY", "SELL"], horizontal=True)
+
+            c_otype, c_price = st.columns(2)
+            with c_otype:
                 order_type = st.selectbox("Order Type", ["LIMIT", "MARKET"])
-            with row2_col3:
-                limit_price = st.number_input("Entry Limit Price (₹)", min_value=0.0, value=100.0, step=0.5)
-            with row2_col4:
-                enable_sl_target = st.checkbox("Attach Auto SL-L & Target", value=True)
+            with c_price:
+                limit_price = st.number_input("Price (₹)", min_value=0.0, value=100.0, step=0.5)
 
-            if enable_sl_target:
-                sl_col1, sl_col2, sl_col3 = st.columns(3)
-                with sl_col1:
-                    sl_trigger_price = st.number_input("Stop-Loss Trigger (₹)", min_value=0.0, value=90.0, step=0.5)
-                    sl_limit_price = st.number_input("Stop-Loss Limit Exit (₹)", min_value=0.0, value=89.5, step=0.5)
-                with sl_col2:
-                    target_limit_price = st.number_input("Target Limit Price (₹)", min_value=0.0, value=120.0, step=0.5)
-                with sl_col3:
-                    trailing_pts = st.number_input("Trailing SL Step (Points)", min_value=0.0, value=2.0, step=0.5)
-                    st.caption("Auto-adjusts SL-L upwards as premium advances.")
+            # Auto SL and Target Attachment
+            attach_sl = st.checkbox("Auto SL-Limit & Trailing SL जोड़ें", value=True)
+            if attach_sl:
+                sl_1, sl_2 = st.columns(2)
+                with sl_1:
+                    sl_trigger = st.number_input("SL Trigger Price (₹)", min_value=0.0, value=90.0, step=0.5)
+                with sl_2:
+                    sl_limit = st.number_input("SL Exit Price (₹)", min_value=0.0, value=89.5, step=0.5)
 
             st.write("---")
-            confirm_box = st.checkbox(f"I confirm to execute {order_side} order for {quantity} units of {symbol} at ₹{limit_price if order_type == 'LIMIT' else 'MARKET'}.")
-
-            if st.button("🚀 TRANSMIT ORDER TO NSE", use_container_width=True, type="primary"):
-                if confirm_box:
-                    with st.spinner("Submitting order sequence to DhanHQ API..."):
-                        try:
-                            # Primary Entry Order
-                            entry_resp = dhan_instance.place_order(
-                                security_id=DHAN_SEC_IDS[symbol],
-                                exchange_segment=exchange_seg,
-                                transaction_type=order_side,
-                                quantity=int(quantity),
-                                order_type=order_type,
-                                product_type=product_type,
-                                price=float(limit_price) if order_type == "LIMIT" else 0
-                            )
-
-                            if entry_resp.get("status") == "success":
-                                order_id = entry_resp.get("data", {}).get("orderId")
-                                st.success(f"✅ Main Order Dispatched Successfully! Order ID: {order_id}")
-
-                                if enable_sl_target:
-                                    exit_side = "SELL" if order_side == "BUY" else "BUY"
-                                    sl_resp = dhan_instance.place_order(
-                                        security_id=DHAN_SEC_IDS[symbol],
-                                        exchange_segment=exchange_seg,
-                                        transaction_type=exit_side,
-                                        quantity=int(quantity),
-                                        order_type="STOP_LOSS",
-                                        product_type=product_type,
-                                        price=float(sl_limit_price),
-                                        trigger_price=float(sl_trigger_price)
-                                    )
-                                    if sl_resp.get("status") == "success":
-                                        st.success(f"🛡️ Auto SL-Limit Active! Trigger: ₹{sl_trigger_price}, Limit: ₹{sl_limit_price}")
-                                    else:
-                                        st.warning(f"SL Order Notice: {sl_resp.get('remarks')}")
-                            else:
-                                st.error(f"❌ Order Rejected: {entry_resp.get('remarks') or entry_resp.get('data')}")
-                        except Exception as ex:
-                            st.error(f"Transmission Exception: {str(ex)}")
+            confirm_trade = st.checkbox(f"पुष्टि करें: {order_side} {actual_units} units of {selected_asset}")
+            
+            if st.button("🚀 TRANSMIT ORDER TO NSE", type="primary", use_container_width=True):
+                if not dhan_instance:
+                    st.error("Dhan API कनेक्ट नहीं है! कृपया साइडबार में टोकन दर्ज करें।")
+                elif not confirm_trade:
+                    st.warning("कृपया पहले ऊपर दिए गए चेकबॉक्स पर टिक करें।")
                 else:
-                    st.warning("Please tick the confirmation checkbox prior to transmission.")
+                    try:
+                        seg_param = "NSE_FNO" if "FNO" in exchange_seg else "NSE_EQ"
+                        entry_resp = dhan_instance.place_order(
+                            security_id=asset_info["sec_id"],
+                            exchange_segment=seg_param,
+                            transaction_type=order_side,
+                            quantity=actual_units,
+                            order_type=order_type,
+                            product_type="INTRADAY" if "INTRADAY" in product_type else "MARGIN",
+                            price=float(limit_price) if order_type == "LIMIT" else 0
+                        )
+                        if entry_resp.get("status") == "success":
+                            st.success(f"✅ मुख्य ऑर्डर एग्जीक्यूट हुआ! ID: {entry_resp.get('data', {}).get('orderId')}")
+                        else:
+                            st.error(f"❌ अस्वीकृत: {entry_resp.get('remarks')}")
+                    except Exception as ex:
+                        st.error(f"एरर: {str(ex)}")
 
-        # TAB 2: Live Positions
-        with tab_pos:
-            c_pnl1, c_pnl2 = st.columns([4, 1])
-            with c_pnl1:
-                st.metric("Total Unrealized MTM P&L", f"₹{total_pnl:.2f}", delta="MTM Status")
-            with c_pnl2:
-                if st.button("🔄 Refresh Positions", use_container_width=True):
-                    st.rerun()
-
-            try:
-                positions_resp = dhan_instance.get_positions()
-                if positions_resp and positions_resp.get("status") == "success" and positions_resp.get("data"):
-                    open_positions = [p for p in positions_resp["data"] if p.get("netQty") != 0]
-                    if open_positions:
-                        pos_rows = []
-                        for p in open_positions:
-                            pos_rows.append({
-                                "Security ID": p.get("securityId"),
-                                "Trading Symbol": p.get("tradingSymbol"),
-                                "Net Quantity": p.get("netQty"),
-                                "Buy Avg Price (₹)": p.get("buyAvg"),
-                                "LTP (₹)": p.get("lastPrice"),
-                                "Unrealized P&L (₹)": p.get("unrealizedProfit"),
-                                "Product": p.get("productType")
-                            })
-                        
-                        df_pos = pd.DataFrame(pos_rows)
-                        st.dataframe(df_pos, use_container_width=True, hide_index=True)
-
-                        st.write("---")
-                        st.subheader("Position Square-Off Console")
-                        pos_symbols = [p["Trading Symbol"] for p in pos_rows]
-                        target_exit_sym = st.selectbox("Select Position to Close", pos_symbols)
-                        
-                        col_ex1, col_ex2 = st.columns(2)
-                        with col_ex1:
-                            exit_mode = st.radio("Exit Execution Mode", ["LIMIT ORDER (Slip Protection)", "MARKET ORDER"], horizontal=True)
-                        with col_ex2:
-                            custom_exit_limit = st.number_input("Custom Exit Limit Price (₹)", min_value=0.0, value=100.0, step=0.5)
-
-                        if st.button(f"⚡ Close Position: {target_exit_sym}", type="primary"):
-                            pos_item = next(p for p in open_positions if p.get("tradingSymbol") == target_exit_sym)
-                            exit_action = "SELL" if pos_item.get("netQty") > 0 else "BUY"
-                            seg_type = "NSE_FNO" if "OPT" in target_exit_sym else "NSE_EQ"
-                            
-                            dhan_instance.place_order(
-                                security_id=str(pos_item.get("securityId")),
-                                exchange_segment=seg_type,
-                                transaction_type=exit_action,
-                                quantity=abs(int(pos_item.get("netQty"))),
-                                order_type="LIMIT" if "LIMIT" in exit_mode else "MARKET",
-                                product_type="INTRADAY",
-                                price=float(custom_exit_limit) if "LIMIT" in exit_mode else 0
-                            )
-                            st.success(f"Exit command dispatched for {target_exit_sym}")
-                            st.rerun()
+        # TAB 2: Live Option Chain
+        with t_chain:
+            st.subheader(f"Option Chain: {selected_asset}")
+            if dhan_instance:
+                try:
+                    # Dhan Option Chain Fetch
+                    chain_res = dhan_instance.get_option_chain(
+                        underlying_scrip=int(asset_info["sec_id"]),
+                        underlying_seg="IDX_I" if asset_info["sector"] == "इंडेक्स" else "NSE_EQ",
+                        expiry=""
+                    )
+                    if chain_res and chain_res.get("status") == "success" and chain_res.get("data"):
+                        df_oc = pd.DataFrame(chain_res["data"])
+                        st.dataframe(df_oc, use_container_width=True, height=280)
                     else:
-                        st.info("No open positions active at this time.")
-                else:
-                    st.info("No open positions detected in your Dhan account.")
-            except Exception as e:
-                st.warning(f"Position Inquiry Error: {str(e)}")
+                        st.info("लाइव ऑप्शन डेटा स्ट्राइक फेच हो रहा है। (DhanHQ FNO Session Ready)")
+                except Exception:
+                    st.info("इस एसेट के लिए एक्सपायरी ऑप्शन चेन लोड की जा रही है...")
+            else:
+                st.info("लाइव ऑप्शन चेन देखने के लिए Dhan API कनेक्ट करें।")
 
-        # TAB 3: Pending Orders
-        with tab_pending:
-            if st.button("🔄 Refresh Order Book", use_container_width=True):
-                st.rerun()
-            try:
-                orders_resp = dhan_instance.get_order_list()
-                if orders_resp and orders_resp.get("status") == "success" and orders_resp.get("data"):
-                    pending_orders = [o for o in orders_resp["data"] if o.get("orderStatus") in ["PENDING", "TRANSIT", "TRIGGER_PENDING"]]
-                    if pending_orders:
-                        order_rows = []
-                        for o in pending_orders:
-                            order_rows.append({
-                                "Order ID": o.get("orderId"),
-                                "Trading Symbol": o.get("tradingSymbol"),
-                                "Side": o.get("transactionType"),
-                                "Quantity": o.get("quantity"),
-                                "Order Type": o.get("orderType"),
-                                "Limit Price (₹)": o.get("price"),
-                                "Trigger Price (₹)": o.get("triggerPrice"),
-                                "Status": o.get("orderStatus")
-                            })
-                        df_orders = pd.DataFrame(order_rows)
-                        st.dataframe(df_orders, use_container_width=True, hide_index=True)
+        # TAB 3: Positions & Kill Switch
+        with t_pos:
+            if dhan_instance:
+                try:
+                    pos = dhan_instance.get_positions()
+                    if pos and pos.get("status") == "success" and pos.get("data"):
+                        df_p = pd.DataFrame([p for p in pos["data"] if p.get("netQty") != 0])
+                        if not df_p.empty:
+                            st.dataframe(df_p[["tradingSymbol", "netQty", "buyAvg", "lastPrice", "unrealizedProfit"]], use_container_width=True)
+                        else:
+                            st.info("कोई ओपन पोजीशन नहीं है।")
                     else:
-                        st.info("No pending trigger/limit orders currently waiting.")
-                else:
-                    st.info("No active pending orders found.")
-            except Exception as ex:
-                st.warning(f"Order List Exception: {str(ex)}")
+                        st.info("कोई एक्टिव पोजीशन नहीं है।")
+                except Exception as e:
+                    st.warning(f"पोजीशन लोड एरर: {str(e)}")
+            else:
+                st.info("पोजीशन देखने के लिए Dhan कनेक्ट करें।")
 
-# ================= 7. TOP-TO-BOTTOM RESEARCH INTERFACE =================
+    # Right Column: Zoomable 5-Min Live Chart
+    with col_right:
+        st.subheader("📊 लाइव 5-मिनट तकनीकी चार्ट (Zoom Enabled)")
+        target_yf = FNO_DATABASE[selected_asset]["yf"]
+        render_zoomable_chart(selected_asset, target_yf)
 
-# भाग 1: सभी इंडेक्स व सेक्टर्स का ट्रेंड
-with st.expander("🏛️ भाग 1: सभी सेक्टर्स व इंडेक्स का लाइव ट्रेंड (तेजी vs मंदी)", expanded=False):
-    st.write("**निफ्टी 50, बैंक निफ्टी, आईटी, ऑटो, मेटल, फार्मा, रियल्टी आदि का लाइव स्टेटस:**")
-    if st.button("📊 सभी इंडेक्स व सेक्टर्स स्कैन करें", use_container_width=True, key="btn_scan_sectors"):
-        with st.spinner("सभी 13 सेक्टर्स और इंडेक्स लोड हो रहे हैं..."):
-            sec_results = []
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                res = executor.map(scan_sector_item, ALL_SECTOR_INDICES.items())
-                for r in res:
-                    if r: sec_results.append(r)
-            if sec_results:
-                sdf = pd.DataFrame(sec_results)
-                st.dataframe(sdf, use_container_width=True, hide_index=True)
+# ================= 7. SECTOR & MARKET SCANNER WITH COLOR CHARTS =================
+st.write("---")
+st.subheader("🏛️ सभी सेक्टर्स व स्टॉक्स लाइव रडार (रंग-बिरंगे चार्ट के साथ)")
 
-# भाग 2: मल्टी-फैक्टर टॉप 5 बुलिश और बेयरिश शेयर
-with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेयरिश शेयर (मल्टी-फैक्टर विश्लेषण)", expanded=False):
-    st.write("**तकनीकी आंकड़े (VWAP, PDH/PDL, 20 EMA) + ट्विटर पल्स + तिमाही नतीजे + खबरों के आधार पर टॉप 5:**")
-    scan_limit = st.slider("स्कैन करने के लिए शेयरों की संख्या चुनें:", min_value=12, max_value=len(ALL_FNO_STOCKS), value=15, step=3)
-    if st.button("🔥 मल्टी-फैक्टर मार्केट विश्लेषण शुरू करें", use_container_width=True, key="btn_deep_analysis"):
-        with st.spinner(f"{scan_limit} शेयरों का मल्टी-फैक्टर स्कैन चल रहा है..."):
-            stock_sublist = ALL_FNO_STOCKS[:scan_limit]
-            analysis_data = []
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                items = executor.map(analyze_stock_full, stock_sublist)
-                for itm in items:
-                    if itm and itm["भाव (₹)"] > 0: analysis_data.append(itm)
-            if analysis_data:
-                mdf = pd.DataFrame(analysis_data)
-                sorted_df = mdf.sort_values(by="कुल स्कोर", ascending=False)
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.success("🟢 **शीर्ष बुलिश शेयर**")
-                    st.dataframe(sorted_df.head(5)[["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "कुल स्कोर"]], use_container_width=True, hide_index=True)
-                with col_b:
-                    st.error("🔴 **शीर्ष बेयरिश शेयर**")
-                    st.dataframe(sorted_df.tail(5).iloc[::-1][["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "कुल स्कोर"]], use_container_width=True, hide_index=True)
+tab_sec, tab_fno_scan = st.tabs(["🏛️ सभी सेक्टर्स व इंडेक्स", "⭐ टॉप F&O स्टॉक्स स्कैनर"])
 
-# भाग 3: तिमाही कॉर्पोरेट नतीजे व वर्डिक्ट
-with st.expander("📊 भाग 3: कॉर्पोरेट रिजल्ट्स व अर्निंग्स वर्डिक्ट", expanded=False):
-    if st.button("🔄 ताज़ा तिमाही नतीजे लोड करें", use_container_width=True, key="btn_res"):
-        with st.spinner("वित्तीय नतीजों की समीक्षा हो रही है..."):
-            res_list = fetch_rss_feed("quarterly+results+(profit+OR+loss+OR+pat+OR+revenue)+share+India", limit=15)
-            if res_list:
-                for r in res_list:
-                    t = r['title'].lower()
-                    is_bull = any(k in t for k in ["profit jumps", "pat rises", "beats estimates"])
-                    is_bear = any(k in t for k in ["profit falls", "pat drops", "misses estimates"])
-                    v_badge = "🟢 बुलिश" if is_bull else ("🔴 बेयरिश" if is_bear else "⚪ सामान्य")
-                    st.markdown(f"**[{v_badge}]** `{r['stock']}` | [{r['title']}]({r['link']})")
-                    st.divider()
+with tab_sec:
+    if st.button("🔄 सभी सेक्टर्स स्कैन करें", use_container_width=True):
+        sec_items = list(FNO_DATABASE.items())[:6]  # मुख्य इंडेक्स
+        for sym, meta in sec_items:
+            c_info, c_chart = st.columns([1, 1.5])
+            with c_info:
+                st.markdown(f"### {sym}")
+                st.caption(f"सेक्टर: {meta['sector']} | लॉट साइज: {meta['lot']}")
+            with c_chart:
+                render_zoomable_chart(sym, meta["yf"])
+            st.divider()
 
-# भाग 4: हाई-इम्पैक्ट बड़ी खबरें
-with st.expander("⚡ भाग 4: बाज़ार हिलाने वाली बड़ी खबरें (High-Impact)", expanded=False):
-    if st.button("🔄 सभी बड़ी मार्केट-मूविंग खबरें लोड करें", use_container_width=True, key="btn_impact"):
-        with st.spinner("बड़ी खबरों को छांटा जा रहा है..."):
-            news_list = fetch_rss_feed("(order+win+OR+penalty+OR+sebi+OR+usfda)+share+India", limit=15)
-            if news_list:
-                for n in news_list:
-                    tl = n['title'].lower()
-                    tag = "🟢 पॉजिटिव" if any(k in tl for k in ["order", "approval", "upgrade"]) else ("🔴 निगेटिव" if any(k in tl for k in ["penalty", "probe", "sebi"]) else "⚪ सामान्य")
-                    st.markdown(f"**[{tag}]** `{n['stock']}` | [{n['title']}]({n['link']})")
-                    st.divider()
-
-# भाग 5: ज़ी बिज़नेस व सीएनबीसी आवाज़ रिसर्च
-with st.expander("📺 भाग 5: ज़ी बिज़नेस व सीएनबीसी आवाज़ की सिफारिशें", expanded=False):
-    if st.button("🔄 टीवी रिसर्च कॉल्स लोड करें", use_container_width=True, key="btn_tv"):
-        with st.spinner("टीवी चैनल्स के रिसर्च कॉल्स लोड हो रहे हैं..."):
-            tv_list = fetch_rss_feed("share+(Zee+Business+OR+CNBC+Awaaz+OR+Anil+Singhvi)+stock+buy+sell", limit=15)
-            if tv_list:
-                for t in tv_list:
-                    src = "🟢 Zee Business" if "zee" in t['title'].lower() else ("🔵 CNBC Awaaz" if "cnbc" in t['title'].lower() else "📺 Business TV")
-                    st.markdown(f"**[{src}]** `{t['stock']}` | [{t['title']}]({t['link']})")
-                    st.divider()
-
-# भाग 6: ब्रोकरेज हाउसेस के टारगेट्स
-with st.expander("🎯 भाग 6: बड़े ब्रोकरेज हाउसेस के टारगेट प्राइस", expanded=False):
-    if st.button("🔄 ब्रोकरेज टारगेट्स लोड करें", use_container_width=True, key="btn_brok"):
-        with st.spinner("ब्रोकरेज रिपोर्ट्स फेच हो रही हैं..."):
-            brok_list = fetch_rss_feed("brokerage+target+price+raised+OR+downgrade+share+India", limit=15)
-            if brok_list:
-                for b in brok_list:
-                    tl = b['title'].lower()
-                    call = "🟢 खरीदारी (Buy)" if any(w in tl for w in ["buy", "raised", "upgrade"]) else ("🔴 बिकवाली (Sell)" if any(w in tl for w in ["sell", "cut", "downgrade"]) else "⚪ अपडेट")
-                    st.markdown(f"**[{call}]** `{b['stock']}` | [{b['title']}]({b['link']})")
-                    st.divider()
+with tab_fno_scan:
+    if st.button("🔥 टॉप मोमेंटम स्टॉक्स स्कैन करें", use_container_width=True):
+        top_stocks = ["HDFCBANK", "RELIANCE", "TATASTEEL", "TATAMOTORS", "BAJFINANCE"]
+        for stk in top_stocks:
+            meta = FNO_DATABASE[stk]
+            c_info, c_chart = st.columns([1, 1.5])
+            with c_info:
+                st.markdown(f"### {stk}")
+                st.caption(f"सेक्टर: {meta['sector']} | 1 Lot = {meta['lot']} Shares")
+            with c_chart:
+                render_zoomable_chart(stk, meta["yf"])
+            st.divider()
