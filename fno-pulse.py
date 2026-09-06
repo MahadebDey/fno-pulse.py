@@ -55,25 +55,23 @@ if not st.session_state["authenticated"]:
             else:
                 st.error("गलत पिन! कृपया पुनः प्रयास करें।")
     st.stop()
-
 # ================= 3. Dhan API Connection (Sidebar) =================
-# अपनी 10-अंकीय Dhan Client ID को नीचे कोट्स में डिफ़ॉल्ट के रूप में डाल सकते हैं:
-DEFAULT_DHAN_CLIENT_ID = "1101101919"
-
 with st.sidebar:
     st.header("⚡ Dhan API Setup")
     st.caption("Enter your 24-hour Dhan access token:")
     
-    saved_client_id = st.session_state.get("dhan_client_id", DEFAULT_DHAN_CLIENT_ID)
-    dhan_client_id = st.text_input("Dhan Client ID", value=saved_client_id, type="password")
+    dhan_client_id = st.text_input("Dhan Client ID", value=st.session_state.get("dhan_client_id", ""), type="password")
     dhan_token = st.text_input("Dhan Access Token", value=st.session_state.get("dhan_token", ""), type="password")
     
     dhan_instance = None
-    if dhan_client_id and dhan_token and DHAN_AVAILABLE:
-        clean_id = str(dhan_client_id).strip()
+    if dhan_token and DHAN_AVAILABLE:
         clean_tok = str(dhan_token).strip()
+        clean_id = str(dhan_client_id).strip() if dhan_client_id else ""
         try:
-            temp_dhan = dhanhq(clean_id, clean_tok)
+            # केवल टोकन पास होगा (आर्गुमेंट एरर को पूरी तरह ख़त्म करने के लिए)
+            temp_dhan = dhanhq(clean_tok)
+            
+            # कनेक्शन टेस्ट
             test_resp = temp_dhan.get_fund_limits()
             
             if isinstance(test_resp, dict) and test_resp.get("status") == "success":
