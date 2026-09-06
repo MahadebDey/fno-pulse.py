@@ -401,19 +401,41 @@ def compute_heikin_ashi(df):
     return ha
 
 def render_zoomable_chart(symbol, yf_ticker):
-    tf = st.session_state.get("chart_tf", "5m")
-    ctype = st.session_state.get("chart_type", "Regular Candlestick")
-    show_ema = st.session_state.get("chart_show_ema", True)
+    fig.update_layout(
+            title=dict(
+                text=f"<b>{symbol}</b> | {label_name} ({tf.upper()}) | {'+' if is_positive else ''}{pct_change:.2f}%",
+                font=dict(size=14, color="#FFFFFF"),
+                x=0.01,
+                y=0.98
+            ),
+            template="plotly_dark",
+            height=420,
+            margin=dict(l=10, r=10, t=30, b=30),
+            xaxis_rangeslider_visible=False,
+            dragmode="pan",  # मोबाइल पर बॉक्स बनने के बजाय स्मूथ स्क्रॉल और पिंच-ज़ूम होगा
+            legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5)
+        )
 
-    tf_params = {
-        "1m": {"period": "2d", "interval": "1m"},
-        "5m": {"period": "5d", "interval": "5m"},
-        "15m": {"period": "10d", "interval": "15m"},
-        "1h": {"period": "1mo", "interval": "60m"},
-        "1d": {"period": "6mo", "interval": "1d"}
-    }
-    cfg = tf_params.get(tf, {"period": "5d", "interval": "5m"})
+        if tf in ["1m", "5m", "15m"]:
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=["sat", "mon"]),
+                    dict(bounds=[15.67, 9.25], pattern="hour")
+                ]
+            )
 
+        st.markdown(f'<div class="{border_class}">', unsafe_allow_html=True)
+        # scrollZoom और touch gesture को एक्टिव रखने के लिए config
+        st.plotly_chart(
+            fig, 
+            use_container_width=True, 
+            config={
+                "scrollZoom": True,
+                "displayModeBar": False,
+                "doubleClick": "reset"
+            }
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
     try:
         data = yf.download(yf_ticker, period=cfg["period"], interval=cfg["interval"], progress=False)
         if isinstance(data.columns, pd.MultiIndex):
