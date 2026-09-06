@@ -6,13 +6,17 @@ import numpy as np
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 
-# DhanHQ Safe Import
+# DhanHQ Integration (v2.2+ Compatible)
 try:
-    import dhanhq
-    from dhanhq import dhanhq as DhanHQClient
+    from dhanhq import dhanhq, DhanContext
     DHAN_AVAILABLE = True
-except Exception:
-    DHAN_AVAILABLE = False
+except ImportError:
+    try:
+        from dhanhq import dhanhq
+        DhanContext = None
+        DHAN_AVAILABLE = True
+    except ImportError:
+        DHAN_AVAILABLE = False
 
 # ================= 1. Page Configuration & Custom CSS =================
 st.set_page_config(
@@ -56,37 +60,44 @@ if not st.session_state["authenticated"]:
             else:
                 st.error("गलत पिन! कृपया पुनः प्रयास करें।")
     st.stop()
+
 # ================= 3. Dhan API Connection (Sidebar) =================
+# आपकी Dhan Client ID डिफ़ॉल्ट रूप से सेट कर दी गई है:
+DEFAULT_DHAN_CLIENT_ID = "1101101919"
+
 with st.sidebar:
     st.header("⚡ Dhan API Setup")
     st.caption("Enter your 24-hour Dhan access token:")
     
-    dhan_client_id = st.text_input("Dhan Client ID", value=st.session_state.get("dhan_client_id", ""), type="password")
+    saved_client_id = st.session_state.get("dhan_client_id", DEFAULT_DHAN_CLIENT_ID)
+    dhan_client_id = st.text_input("Dhan Client ID", value=saved_client_id)
     dhan_token = st.text_input("Dhan Access Token", value=st.session_state.get("dhan_token", ""), type="password")
     
     dhan_instance = None
     if dhan_client_id and dhan_token and DHAN_AVAILABLE:
         clean_id = str(dhan_client_id).strip()
         clean_tok = str(dhan_token).strip()
-        
         try:
-            # सटीक ऑब्जेक्ट निर्माण
-            if hasattr(dhanhq, 'dhanhq') and callable(getattr(dhanhq, 'dhanhq')):
-                temp_dhan = dhanhq.dhanhq(clean_id, clean_tok)
+            # DhanHQ v2.2+ Context Handling
+            if DhanContext is not None:
+                ctx = DhanContext(client_id=clean_id, access_token=clean_tok)
+                temp_dhan = dhanhq(ctx)
             else:
-                temp_dhan = DhanHQClient(clean_id, clean_tok)
+                try:
+                    temp_dhan = dhanhq(clean_id, clean_tok)
+                except TypeError:
+                    temp_dhan = dhanhq(client_id=clean_id, access_token=clean_tok)
             
-            # ऑथेंटिकेशन टेस्ट
+            # Connection Verification
             test_resp = temp_dhan.get_fund_limits()
-            
             if isinstance(test_resp, dict) and test_resp.get("status") == "success":
                 dhan_instance = temp_dhan
                 st.session_state["dhan_client_id"] = clean_id
                 st.session_state["dhan_token"] = clean_tok
                 st.success("🟢 Dhan API Live Connected")
             elif isinstance(test_resp, dict):
-                err_msg = test_resp.get("remarks") or test_resp.get("data") or "Token Validation Failed"
-                st.error(f"Dhan Error: {err_msg}")
+                remarks = test_resp.get("remarks") or test_resp.get("data") or "Token Validation Failed"
+                st.error(f"Dhan Error: {remarks}")
                 dhan_instance = None
             else:
                 dhan_instance = temp_dhan
@@ -108,6 +119,11 @@ with st.sidebar:
     if st.button("🔒 Logout", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
+
+st.title("⚡ महादेब स्टॉक रिसर्च")
+st.caption("F&O मार्केट इंटेलिजेंस + DhanHQ Advanced Options Trading Terminal")
+
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ================= 4. Stock & Security Mapping =================
 DHAN_SEC_IDS = {
@@ -273,7 +289,7 @@ def analyze_stock_full(symbol):
     except Exception:
         return None
 
-# ================= 6. ADVANCED TRADING TERMINAL =================
+# ================= 6. ADVANCED TRADING TERMINAL (ALL-ENGLISH COLUMNS) =================
 with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded=True):
     if not dhan_instance:
         st.warning("⚠️ Dhan API Not Connected! Enter Client ID & Access Token in the sidebar to activate live execution.")
@@ -292,14 +308,14 @@ with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded
             if st.button("🚨 EMERGENCY SQUARE OFF ALL POSITIONS", type="primary", use_container_width=True):
                 for p in p_check["data"]:
                     if p.get("netQty") != 0:
-                        exit_side = dhan_instance.SELL if p.get("netQty") > 0 else dhan_instance.BUY
+                        exit_side = "SELL" if p.get("netQty") > 0 else "BUY"
                         dhan_instance.place_order(
                             security_id=str(p.get("securityId")),
-                            exchange_segment=dhan_instance.NSE_FNO if "OPT" in p.get("tradingSymbol", "") else dhan_instance.NSE,
+                            exchange_segment="NSE_FNO" if "OPT" in p.get("tradingSymbol", "") else "NSE_EQ",
                             transaction_type=exit_side,
                             quantity=abs(int(p.get("netQty"))),
-                            order_type=dhan_instance.MARKET,
-                            product_type=dhan_instance.INTRA,
+                            order_type="MARKET",
+                            product_type="INTRADAY",
                             price=0
                         )
                 st.success("All active positions successfully terminated.")
@@ -314,11 +330,11 @@ with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded
             with row1_col1:
                 symbol = st.selectbox("Underlying Asset", list(DHAN_SEC_IDS.keys()))
             with row1_col2:
-                exchange_seg = st.selectbox("Exchange Segment", ["NSE_FNO (Options/Futures)", "NSE_EQ (Equity Cash)"])
+                exchange_seg = st.selectbox("Exchange Segment", ["NSE_FNO", "NSE_EQ"])
             with row1_col3:
                 order_side = st.radio("Side", ["BUY", "SELL"], horizontal=True)
             with row1_col4:
-                product_type = st.selectbox("Product Type", ["INTRADAY (MIS)", "NORMAL (NRML/CNC)"])
+                product_type = st.selectbox("Product Type", ["INTRADAY", "CNC", "MARGIN"])
 
             row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
             with row2_col1:
@@ -348,18 +364,14 @@ with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded
                 if confirm_box:
                     with st.spinner("Submitting order sequence to DhanHQ API..."):
                         try:
-                            action = dhan_instance.BUY if order_side == "BUY" else dhan_instance.SELL
-                            prod = dhan_instance.INTRA if "INTRADAY" in product_type else (dhan_instance.MARGIN if "FNO" in exchange_seg else dhan_instance.CNC)
-                            seg = dhan_instance.NSE_FNO if "FNO" in exchange_seg else dhan_instance.NSE
-                            otype = dhan_instance.LIMIT if order_type == "LIMIT" else dhan_instance.MARKET
-                            
+                            # Primary Entry Order
                             entry_resp = dhan_instance.place_order(
                                 security_id=DHAN_SEC_IDS[symbol],
-                                exchange_segment=seg,
-                                transaction_type=action,
+                                exchange_segment=exchange_seg,
+                                transaction_type=order_side,
                                 quantity=int(quantity),
-                                order_type=otype,
-                                product_type=prod,
+                                order_type=order_type,
+                                product_type=product_type,
                                 price=float(limit_price) if order_type == "LIMIT" else 0
                             )
 
@@ -368,14 +380,14 @@ with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded
                                 st.success(f"✅ Main Order Dispatched Successfully! Order ID: {order_id}")
 
                                 if enable_sl_target:
-                                    exit_side = dhan_instance.SELL if order_side == "BUY" else dhan_instance.BUY
+                                    exit_side = "SELL" if order_side == "BUY" else "BUY"
                                     sl_resp = dhan_instance.place_order(
                                         security_id=DHAN_SEC_IDS[symbol],
-                                        exchange_segment=seg,
+                                        exchange_segment=exchange_seg,
                                         transaction_type=exit_side,
                                         quantity=int(quantity),
-                                        order_type=dhan_instance.SL,
-                                        product_type=prod,
+                                        order_type="STOP_LOSS",
+                                        product_type=product_type,
                                         price=float(sl_limit_price),
                                         trigger_price=float(sl_trigger_price)
                                     )
@@ -432,16 +444,16 @@ with st.expander("⚡ DHAN ADVANCED OPTIONS & EQUITY TRADING TERMINAL", expanded
 
                         if st.button(f"⚡ Close Position: {target_exit_sym}", type="primary"):
                             pos_item = next(p for p in open_positions if p.get("tradingSymbol") == target_exit_sym)
-                            exit_action = dhan_instance.SELL if pos_item.get("netQty") > 0 else dhan_instance.BUY
-                            seg_type = dhan_instance.NSE_FNO if "OPT" in target_exit_sym else dhan_instance.NSE
+                            exit_action = "SELL" if pos_item.get("netQty") > 0 else "BUY"
+                            seg_type = "NSE_FNO" if "OPT" in target_exit_sym else "NSE_EQ"
                             
                             dhan_instance.place_order(
                                 security_id=str(pos_item.get("securityId")),
                                 exchange_segment=seg_type,
                                 transaction_type=exit_action,
                                 quantity=abs(int(pos_item.get("netQty"))),
-                                order_type=dhan_instance.LIMIT if "LIMIT" in exit_mode else dhan_instance.MARKET,
-                                product_type=dhan_instance.INTRA,
+                                order_type="LIMIT" if "LIMIT" in exit_mode else "MARKET",
+                                product_type="INTRADAY",
                                 price=float(custom_exit_limit) if "LIMIT" in exit_mode else 0
                             )
                             st.success(f"Exit command dispatched for {target_exit_sym}")
