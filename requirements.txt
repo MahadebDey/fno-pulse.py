@@ -1,6 +1,7 @@
 streamlit
-requests
-beautifulsoup4
-pandas
-yfinance
 dhanhq
+yfinance
+pandas
+numpy
+requests
+plotly
