@@ -34,17 +34,17 @@ st.markdown("""
     .block-container { padding-top: 1rem; padding-bottom: 2rem; }
     .chart-box-green {
         border: 2px solid #00E676 !important;
-        border-radius: 10px !important;
-        padding: 10px !important;
-        background-color: rgba(0, 230, 118, 0.04);
-        margin-bottom: 15px;
+        border-radius: 8px !important;
+        padding: 6px !important;
+        background-color: rgba(0, 230, 118, 0.03);
+        margin-top: 8px;
     }
     .chart-box-red {
         border: 2px solid #FF5252 !important;
-        border-radius: 10px !important;
-        padding: 10px !important;
-        background-color: rgba(255, 82, 82, 0.04);
-        margin-bottom: 15px;
+        border-radius: 8px !important;
+        padding: 6px !important;
+        background-color: rgba(255, 82, 82, 0.03);
+        margin-top: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -100,10 +100,10 @@ cached_creds = load_cached_credentials()
 default_client_id = cached_creds.get("client_id", "1101101919")
 default_token = cached_creds.get("token", "")
 
-# ================= 4. Sidebar & Dhan Connectivity + Global Chart Settings =================
+# ================= 4. Sidebar & Dhan Live Connectivity + Global Settings =================
 with st.sidebar:
     st.header("⚡ Dhan API Setup")
-    st.caption("टोकन एक बार दर्ज करने पर सुरक्षित सेव रहेगा:")
+    st.caption("टोकन हमेशा सुरक्षित सेव रहेगा (जब तक आप रीसेट न करें):")
     
     dhan_client_id = st.text_input("Dhan Client ID", value=default_client_id)
     dhan_token = st.text_input("Dhan Access Token", value=default_token, type="password")
@@ -129,10 +129,10 @@ with st.sidebar:
             test_resp = temp_dhan.get_fund_limits()
             if isinstance(test_resp, dict) and test_resp.get("status") == "success":
                 dhan_instance = temp_dhan
-                st.success("🟢 Dhan API Live Connected (Saved)")
+                st.success("🟢 Dhan API Live Connected")
             else:
                 dhan_instance = temp_dhan
-                st.success("🟢 Dhan API Connected (Saved)")
+                st.success("🟢 Dhan API Connected")
         except Exception as e:
             st.error(f"Connection Exception: {str(e)}")
             dhan_instance = None
@@ -142,23 +142,20 @@ with st.sidebar:
     if default_token or dhan_token:
         if st.button("🗑️ डिलीट / रीसेट Dhan टोकन", use_container_width=True):
             delete_cached_token()
-            st.warning("टोकन डिलीट कर दिया गया है।")
+            st.warning("टोकन हटा दिया गया है।")
             st.rerun()
 
     st.divider()
-    # 🌟 ग्लोबल चार्ट सेटिंग्स (एक बार सेट करें, सभी चार्ट्स पर लागू)
     st.header("📊 ग्लोबल चार्ट सेटिंग्स")
-    st.caption("यहाँ किया गया बदलाव सभी चार्ट्स में अपने आप सेट हो जाएगा:")
-    
     global_candle_type = st.radio(
-        "कैंडल प्रकार (Candle Type):",
+        "कैंडल प्रकार:",
         ["Regular Candlestick", "Heikin-Ashi (हेइकिन-आशी)"],
         index=0,
         key="global_candle_type"
     )
     
     global_timeframe = st.selectbox(
-        "डिफ़ॉल्ट टाइमफ्रेम (Timeframe):",
+        "डिफ़ॉल्ट टाइमफ्रेम:",
         ["1m", "5m", "15m", "1h", "1d"],
         index=1,
         format_func=lambda x: {
@@ -166,12 +163,12 @@ with st.sidebar:
             "5m": "5 Min (Intraday)",
             "15m": "15 Min (Trend)",
             "1h": "1 Hour (Swing)",
-            "1d": "Daily (Positional)"
+            "1d": "Daily"
         }.get(x, x),
         key="global_timeframe"
     )
     
-    global_show_ema = st.toggle("9 EMA (गोल्डन लाइन) दिखाएं", value=True, key="global_show_ema")
+    global_show_ema = st.toggle("9 EMA (गोल्डन लाइन)", value=True, key="global_show_ema")
 
     st.divider()
     st.subheader("🛡️ Risk & Kill Switch")
@@ -227,7 +224,7 @@ FNO_DATABASE = {
 
 ALL_ASSETS = sorted(list(FNO_DATABASE.keys()))
 
-# ================= 6. Universal Interactive Chart Engine =================
+# ================= 6. Clean NSE Market-Hours Chart Engine (No Gaps, No Overlap) =================
 def calculate_heikin_ashi(df):
     ha_df = df.copy()
     ha_df['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
@@ -241,16 +238,15 @@ def calculate_heikin_ashi(df):
     ha_df['HA_Low'] = ha_df[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
     return ha_df
 
-def render_zoomable_chart(symbol, yf_ticker, timeframe_choice=None, candle_type_choice=None, show_ema_choice=None):
-    # ग्लोबल सेटिंग्स से मान लेना (यदि अलग से पास न किया गया हो)
+def render_zoomable_chart(symbol, yf_ticker, timeframe_choice=None):
     tf = timeframe_choice if timeframe_choice else st.session_state.get("global_timeframe", "5m")
-    ctype = candle_type_choice if candle_type_choice else st.session_state.get("global_candle_type", "Regular Candlestick")
-    show_ema = show_ema_choice if show_ema_choice is not None else st.session_state.get("global_show_ema", True)
+    ctype = st.session_state.get("global_candle_type", "Regular Candlestick")
+    show_ema = st.session_state.get("global_show_ema", True)
 
     tf_params = {
-        "1m": {"period": "1d", "interval": "1m"},
+        "1m": {"period": "2d", "interval": "1m"},
         "5m": {"period": "5d", "interval": "5m"},
-        "15m": {"period": "1mo", "interval": "15m"},
+        "15m": {"period": "10d", "interval": "15m"},
         "1h": {"period": "1mo", "interval": "60m"},
         "1d": {"period": "6mo", "interval": "1d"}
     }
@@ -265,6 +261,12 @@ def render_zoomable_chart(symbol, yf_ticker, timeframe_choice=None, candle_type_
             st.info(f"{symbol}: चार्ट डेटा लोड हो रहा है...")
             return
 
+        # भारतीय समय अनुसार 9:15 AM से 3:40 PM फ़िल्टर (इंट्राडे टाइमफ्रेम के लिए)
+        if tf in ["1m", "5m", "15m"]:
+            data.index = data.index.tz_convert("Asia/Kolkata")
+            # सिर्फ मार्केट ऑवर्स रखना
+            data = data.between_time('09:15', '15:40')
+
         last_close = float(data['Close'].iloc[-1])
         first_open = float(data['Open'].iloc[0])
         pct_change = ((last_close - first_open) / first_open) * 100
@@ -272,18 +274,16 @@ def render_zoomable_chart(symbol, yf_ticker, timeframe_choice=None, candle_type_
 
         border_class = "chart-box-green" if is_positive else "chart-box-red"
         
-        # Heikin-Ashi या Normal कैंडल डेटा का चुनाव
         is_ha = "Heikin" in ctype
         if is_ha:
             plot_df = calculate_heikin_ashi(data)
             open_col, high_col, low_col, close_col = 'HA_Open', 'HA_High', 'HA_Low', 'HA_Close'
-            label_prefix = "Heikin-Ashi"
+            label_prefix = "HA"
         else:
             plot_df = data
             open_col, high_col, low_col, close_col = 'Open', 'High', 'Low', 'Close'
-            label_prefix = "Candles"
+            label_prefix = "Candle"
 
-        # 9 EMA गणना
         plot_df['EMA9'] = plot_df['Close'].ewm(span=9, adjust=False).mean()
 
         fig = go.Figure()
@@ -300,37 +300,61 @@ def render_zoomable_chart(symbol, yf_ticker, timeframe_choice=None, candle_type_
             name=f"{label_prefix} ({tf})"
         ))
 
-        # 9 EMA Trace
+        # 9 EMA
         if show_ema:
             fig.add_trace(go.Scatter(
                 x=plot_df.index,
                 y=plot_df['EMA9'],
                 mode='lines',
-                line=dict(color='#FFD700', width=1.8),
+                line=dict(color='#FFD700', width=1.6),
                 name='9 EMA'
             ))
 
+        # चार्ट लेआउट: कोई ओवरलैपिंग नहीं, साफ-सुथरा टाइटल और लेजेंड नीचे
         fig.update_layout(
-            title=f"{symbol} ({label_prefix} | {tf.upper()} | {'+' if is_positive else ''}{pct_change:.2f}%)",
+            title=dict(
+                text=f"<b>{symbol}</b> | {label_prefix} ({tf.upper()}) | {'+' if is_positive else ''}{pct_change:.2f}%",
+                font=dict(size=14, color="#E0E0E0"),
+                x=0.01,
+                y=0.98
+            ),
             template="plotly_dark",
-            height=370,
-            margin=dict(l=10, r=10, t=35, b=10),
+            height=390,
+            margin=dict(l=10, r=10, t=30, b=30),
             xaxis_rangeslider_visible=False,
             dragmode="zoom",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            # लेजेंड को नीचे सेट किया ताकि ऊपर के टाइटल पर ओवरलैप न हो
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.08,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=11)
+            )
         )
 
+        # गैर-मार्केट समय (रात 3:30 PM से सुबह 9:15 AM) और वीकेंड्स के खाली गैप को पूरी तरह हटाना
+        if tf in ["1m", "5m", "15m"]:
+            fig.update_xaxes(
+                rangebreaks=[
+                    dict(bounds=["sat", "mon"]), # शनिवार और रविवार का गैप हटाएं
+                    dict(bounds=[15.67, 9.25], pattern="hour") # 3:40 PM से 9:15 AM का खाली गैप हटाएं
+                ]
+            )
+
         st.markdown(f'<div class="{border_class}">', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": True})
+        # टूलबार को ऑटो-हाइड रखा गया है ताकि स्क्रीन पर बटन न टकराएँ
+        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": False})
         st.markdown('</div>', unsafe_allow_html=True)
     except Exception:
-        st.info(f"{symbol}: चार्ट डेटा उपलब्ध नहीं है।")
+        st.info(f"{symbol}: चार्ट डेटा अपडेट हो रहा है...")
 
 # ================= 7. Trading Terminal & Option Chain =================
 st.title("⚡ महादेब F&O प्रो-टर्मिनल")
 
 with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True):
-    col_left, col_right = st.columns([1.1, 0.9])
+    col_left, col_right = st.columns([1.05, 0.95])
 
     with col_left:
         t_order, t_chain, t_pos = st.tabs(["🛒 Place Order", "📊 Live Option Chain", "📋 Positions"])
@@ -413,11 +437,11 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
                         df_oc = pd.DataFrame(chain_res["data"])
                         st.dataframe(df_oc, use_container_width=True, height=280)
                     else:
-                        st.info("ऑप्शन चेन लोड हो रही है (Dhan API Active)...")
+                        st.info("ऑप्शन डेटा लोड हो रहा है...")
                 except Exception:
-                    st.info("एक्सपायरी ऑप्शन डेटा फ़ेच किया जा रहा है...")
+                    st.info("एक्सपायरी ऑप्शन डेटा फेच हो रहा है...")
             else:
-                st.info("लाइव ऑप्शन चेन के लिए टोकन दर्ज करें।")
+                st.info("लाइव ऑप्शन चेन देखने के लिए Dhan कनेक्ट करें।")
 
         with t_pos:
             if dhan_instance:
@@ -432,19 +456,30 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
                     else:
                         st.info("कोई एक्टिव पोजीशन नहीं है।")
                 except Exception as e:
-                    st.warning(f"पोजीशन लोड एरर: {str(e)}")
+                    st.warning(f"पोजीशन एरर: {str(e)}")
             else:
-                st.info("पोजीशन देखने के लिए Dhan कनेक्ट करें।")
+                st.info("पोजीशन देखने के लिए Dhan टोकन दें।")
 
-    # दायाँ कॉलम: लाइव चार्ट (ग्लोबल सेटिंग्स अनुसार)
+    # दायाँ कॉलम: साफ-सुथरा चार्ट (बिना ओवरलैपिंग के)
     with col_right:
-        st.subheader("📊 लाइव तकनीकी चार्ट")
-        target_yf = FNO_DATABASE[selected_asset]["yf"]
-        render_zoomable_chart(selected_asset, target_yf)
+        c_title, c_tf = st.columns([1.2, 1])
+        with c_title:
+            st.markdown("##### 📈 लाइव तकनीकी चार्ट")
+        with c_tf:
+            current_global_tf = st.session_state.get("global_timeframe", "5m")
+            tf_select = st.selectbox(
+                "टाइमफ्रेम बदलें:",
+                ["1m", "5m", "15m", "1h", "1d"],
+                index=["1m", "5m", "15m", "1h", "1d"].index(current_global_tf),
+                label_visibility="collapsed"
+            )
 
-# ================= 8. Multi-Sector & Stock Scanners (Sync with Global Settings) =================
+        target_yf = FNO_DATABASE[selected_asset]["yf"]
+        render_zoomable_chart(selected_asset, target_yf, timeframe_choice=tf_select)
+
+# ================= 8. Multi-Sector & Stock Scanners =================
 st.write("---")
-st.subheader("🏛️ सभी सेक्टर्स व स्टॉक्स लाइव रडार (ग्लोबल सेटिंग्स सिंक्ड)")
+st.subheader("🏛️ सभी सेक्टर्स व स्टॉक्स लाइव रडार")
 
 tab_sec, tab_fno_scan = st.tabs(["🏛️ मुख्य इंडेक्स व सेक्टर्स", "⭐ टॉप F&O स्टॉक्स"])
 
@@ -455,7 +490,7 @@ with tab_sec:
             c_info, c_chart = st.columns([1, 1.5])
             with c_info:
                 st.markdown(f"### {sym}")
-                st.caption(f"सेक्टर: {meta['sector']} | लॉट साइज: {meta['lot']}")
+                st.caption(f"सेक्टर: {meta['sector']} | लॉट: {meta['lot']}")
             with c_chart:
                 render_zoomable_chart(sym, meta["yf"])
             st.divider()
@@ -468,7 +503,7 @@ with tab_fno_scan:
             c_info, c_chart = st.columns([1, 1.5])
             with c_info:
                 st.markdown(f"### {stk}")
-                st.caption(f"सेक्टर: {meta['sector']} | 1 Lot = {meta['lot']} Shares")
+                st.caption(f"सेक्टर: {meta['sector']} | लॉट: {meta['lot']}")
             with c_chart:
                 render_zoomable_chart(stk, meta["yf"])
             st.divider()
