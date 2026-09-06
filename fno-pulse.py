@@ -6,11 +6,12 @@ import numpy as np
 import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor
 
-# DhanHQ Integration
+# DhanHQ Safe Import
 try:
-    from dhanhq import dhanhq
+    import dhanhq
+    from dhanhq import dhanhq as DhanHQClient
     DHAN_AVAILABLE = True
-except ImportError:
+except Exception:
     DHAN_AVAILABLE = False
 
 # ================= 1. Page Configuration & Custom CSS =================
@@ -64,14 +65,18 @@ with st.sidebar:
     dhan_token = st.text_input("Dhan Access Token", value=st.session_state.get("dhan_token", ""), type="password")
     
     dhan_instance = None
-    if dhan_token and DHAN_AVAILABLE:
+    if dhan_client_id and dhan_token and DHAN_AVAILABLE:
+        clean_id = str(dhan_client_id).strip()
         clean_tok = str(dhan_token).strip()
-        clean_id = str(dhan_client_id).strip() if dhan_client_id else ""
+        
         try:
-            # केवल टोकन पास होगा (आर्गुमेंट एरर को पूरी तरह ख़त्म करने के लिए)
-            temp_dhan = dhanhq(clean_tok)
+            # सटीक ऑब्जेक्ट निर्माण
+            if hasattr(dhanhq, 'dhanhq') and callable(getattr(dhanhq, 'dhanhq')):
+                temp_dhan = dhanhq.dhanhq(clean_id, clean_tok)
+            else:
+                temp_dhan = DhanHQClient(clean_id, clean_tok)
             
-            # कनेक्शन टेस्ट
+            # ऑथेंटिकेशन टेस्ट
             test_resp = temp_dhan.get_fund_limits()
             
             if isinstance(test_resp, dict) and test_resp.get("status") == "success":
@@ -80,7 +85,8 @@ with st.sidebar:
                 st.session_state["dhan_token"] = clean_tok
                 st.success("🟢 Dhan API Live Connected")
             elif isinstance(test_resp, dict):
-                st.error(f"Dhan Error: {test_resp.get('remarks', 'Invalid Token')}")
+                err_msg = test_resp.get("remarks") or test_resp.get("data") or "Token Validation Failed"
+                st.error(f"Dhan Error: {err_msg}")
                 dhan_instance = None
             else:
                 dhan_instance = temp_dhan
@@ -102,11 +108,6 @@ with st.sidebar:
     if st.button("🔒 Logout", use_container_width=True):
         st.session_state["authenticated"] = False
         st.rerun()
-
-st.title("⚡ महादेब स्टॉक रिसर्च")
-st.caption("F&O मार्केट इंटेलिजेंस + DhanHQ Advanced Options Trading Terminal")
-
-HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ================= 4. Stock & Security Mapping =================
 DHAN_SEC_IDS = {
