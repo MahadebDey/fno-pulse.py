@@ -93,6 +93,10 @@ if "chart_show_ema" not in st.session_state:
     st.session_state["chart_show_ema"] = True
 if "selected_fno_asset" not in st.session_state:
     st.session_state["selected_fno_asset"] = "NIFTY"
+if "sector_scan_data" not in st.session_state:
+    st.session_state["sector_scan_data"] = None
+if "top5_scan_data" not in st.session_state:
+    st.session_state["top5_scan_data"] = None
 
 TOKEN_CACHE_FILE = ".dhan_token_cache.json"
 
@@ -196,29 +200,122 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# ================= 5. Databases (F&O, Sectors & Stocks) =================
+# ================= 5. COMPLETE 200+ F&O DATABASE =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+FNO_RAW_MAP = {
+    "AARTIIND": {"lot": 1000, "sec": "केमिकल्स", "step": 10}, "ABB": {"lot": 125, "sec": "कैपिटल गुड्स", "step": 50},
+    "ABBOTINDIA": {"lot": 20, "sec": "फार्मा", "step": 200}, "ABCAPITAL": {"lot": 3100, "sec": "फाइनेंशियल", "step": 5},
+    "ABFRL": {"lot": 2600, "sec": "रिटेल", "step": 5}, "ACC": {"lot": 300, "sec": "सीमेंट", "step": 20},
+    "ADANIENT": {"lot": 300, "sec": "अडानी", "step": 50}, "ADANIPORTS": {"lot": 400, "sec": "अडानी", "step": 20},
+    "ALKEM": {"lot": 100, "sec": "फार्मा", "step": 50}, "AMBUJACEM": {"lot": 900, "sec": "सीमेंट", "step": 10},
+    "APOLLOHOSP": {"lot": 125, "sec": "हेल्थकेयर", "step": 50}, "APOLLOTYRE": {"lot": 1700, "sec": "ऑटो", "step": 10},
+    "ASHOKLEY": {"lot": 5000, "sec": "ऑटो", "step": 5}, "ASIANPAINT": {"lot": 200, "sec": "पेंट्स", "step": 50},
+    "ASTRAL": {"lot": 275, "sec": "इंडस्ट्रियल", "step": 20}, "ATUL": {"lot": 75, "sec": "केमिकल्स", "step": 50},
+    "AUBANK": {"lot": 1000, "sec": "बैंकिंग", "step": 10}, "AUROPHARMA": {"lot": 550, "sec": "फार्मा", "step": 20},
+    "AXISBANK": {"lot": 625, "sec": "बैंकिंग", "step": 10}, "BAJAJ-AUTO": {"lot": 75, "sec": "ऑटो", "step": 100},
+    "BAJAJFINSV": {"lot": 500, "sec": "फाइनेंशियल", "step": 20}, "BAJFINANCE": {"lot": 125, "sec": "फाइनेंशियल", "step": 50},
+    "BALKRISIND": {"lot": 300, "sec": "ऑटो", "step": 20}, "BALRAMCHIN": {"lot": 1600, "sec": "शुगर", "step": 5},
+    "BANDHANBNK": {"lot": 2500, "sec": "बैंकिंग", "step": 5}, "BANKBARODA": {"lot": 2925, "sec": "बैंकिंग", "step": 5},
+    "BATAINDIA": {"lot": 375, "sec": "कंज्यूमर", "step": 20}, "BEL": {"lot": 2700, "sec": "डिफेंस", "step": 5},
+    "BERGEPAINT": {"lot": 1100, "sec": "पेंट्स", "step": 10}, "BHARATFORG": {"lot": 500, "sec": "ऑटो", "step": 20},
+    "BHARTIARTL": {"lot": 475, "sec": "टेलीकॉम", "step": 20}, "BHEL": {"lot": 2625, "sec": "पावर", "step": 5},
+    "BIOCON": {"lot": 2500, "sec": "फार्मा", "step": 5}, "BOSCHLTD": {"lot": 20, "sec": "ऑटो", "step": 200},
+    "BPCL": {"lot": 1800, "sec": "एनर्जी", "step": 10}, "BRITANNIA": {"lot": 125, "sec": "एफएमसीजी", "step": 50},
+    "BSOFT": {"lot": 1000, "sec": "आईटी", "step": 10}, "CANBK": {"lot": 6750, "sec": "बैंकिंग", "step": 2},
+    "CANFINHOME": {"lot": 975, "sec": "फाइनेंशियल", "step": 10}, "CHAMBLFERT": {"lot": 1500, "sec": "केमिकल्स", "step": 5},
+    "CHOLAFIN": {"lot": 625, "sec": "फाइनेंशियल", "step": 20}, "CIPLA": {"lot": 650, "sec": "फार्मा", "step": 20},
+    "COALINDIA": {"lot": 2100, "sec": "माइनिंग", "step": 5}, "COFORGE": {"lot": 150, "sec": "आईटी", "step": 50},
+    "COLPAL": {"lot": 225, "sec": "एफएमसीजी", "step": 50}, "CONCOR": {"lot": 1000, "sec": "लॉजिस्टिक्स", "step": 10},
+    "COROMANDEL": {"lot": 700, "sec": "केमिकल्स", "step": 20}, "CROMPTON": {"lot": 1800, "sec": "कंज्यूमर", "step": 5},
+    "CUMMINSIND": {"lot": 200, "sec": "इंजीनियरिंग", "step": 50}, "DABUR": {"lot": 1250, "sec": "एफएमसीजी", "step": 10},
+    "DALBHARAT": {"lot": 250, "sec": "सीमेंट", "step": 20}, "DEEPAKNTR": {"lot": 300, "sec": "केमिकल्स", "step": 20},
+    "DIVISLAB": {"lot": 150, "sec": "फार्मा", "step": 50}, "DIXON": {"lot": 100, "sec": "कंज्यूमर", "step": 100},
+    "DLF": {"lot": 825, "sec": "रियल्टी", "step": 10}, "DRREDDY": {"lot": 125, "sec": "फार्मा", "step": 50},
+    "EICHERMOT": {"lot": 175, "sec": "ऑटो", "step": 50}, "ESCORTS": {"lot": 175, "sec": "ऑटो", "step": 50},
+    "EXIDEIND": {"lot": 1800, "sec": "ऑटो", "step": 10}, "FEDERALBNK": {"lot": 5000, "sec": "बैंकिंग", "step": 2},
+    "GAIL": {"lot": 4650, "sec": "एनर्जी", "step": 5}, "GLENMARK": {"lot": 425, "sec": "फार्मा", "step": 20},
+    "GMRINFRA": {"lot": 10000, "sec": "इंफ्रा", "step": 1}, "GNFC": {"lot": 1300, "sec": "केमिकल्स", "step": 10},
+    "GODREJCP": {"lot": 500, "sec": "एफएमसीजी", "step": 20}, "GODREJPROP": {"lot": 225, "sec": "रियल्टी", "step": 50},
+    "GRANULES": {"lot": 1500, "sec": "फार्मा", "step": 10}, "GRASIM": {"lot": 250, "sec": "सीमेंट", "step": 20},
+    "GUJGASLTD": {"lot": 1250, "sec": "एनर्जी", "step": 10}, "HAL": {"lot": 150, "sec": "डिफेंस", "step": 50},
+    "HAVELLS": {"lot": 500, "sec": "कंज्यूमर", "step": 20}, "HCLTECH": {"lot": 350, "sec": "आईटी", "step": 20},
+    "HDFCAMC": {"lot": 150, "sec": "फाइनेंशियल", "step": 50}, "HDFCBANK": {"lot": 550, "sec": "बैंकिंग", "step": 10},
+    "HDFCLIFE": {"lot": 1100, "sec": "इंश्योरेंस", "step": 10}, "HEROMOTOCO": {"lot": 150, "sec": "ऑटो", "step": 50},
+    "HINDALCO": {"lot": 1400, "sec": "मेटल", "step": 10}, "HINDPETRO": {"lot": 2025, "sec": "एनर्जी", "step": 5},
+    "HINDUNILVR": {"lot": 300, "sec": "एफएमसीजी", "step": 20}, "ICICIBANK": {"lot": 700, "sec": "बैंकिंग", "step": 10},
+    "ICICIGI": {"lot": 500, "sec": "इंश्योरेंस", "step": 20}, "ICICIPRULI": {"lot": 1500, "sec": "इंश्योरेंस", "step": 10},
+    "IDEA": {"lot": 80000, "sec": "टेलीकॉम", "step": 1}, "IDFCFIRSTB": {"lot": 7500, "sec": "बैंकिंग", "step": 1},
+    "IEX": {"lot": 3750, "sec": "पावर", "step": 2}, "IGL": {"lot": 1375, "sec": "एनर्जी", "step": 5},
+    "INDHOTEL": {"lot": 1000, "sec": "होटल", "step": 10}, "INDIACEM": {"lot": 2900, "sec": "सीमेंट", "step": 5},
+    "INDIAMART": {"lot": 300, "sec": "आईटी", "step": 50}, "INDIGO": {"lot": 150, "sec": "एविएशन", "step": 50},
+    "INDUSINDBK": {"lot": 500, "sec": "बैंकिंग", "step": 20}, "INDUSTOWER": {"lot": 3400, "sec": "टेलीकॉम", "step": 5},
+    "INFY": {"lot": 400, "sec": "आईटी", "step": 20}, "IOC": {"lot": 4875, "sec": "एनर्जी", "step": 2},
+    "IPCALAB": {"lot": 650, "sec": "फार्मा", "step": 20}, "IRCTC": {"lot": 875, "sec": "रेलवे", "step": 10},
+    "ITC": {"lot": 1600, "sec": "एफएमसीजी", "step": 5}, "JINDALSTEL": {"lot": 625, "sec": "मेटल", "step": 10},
+    "JKCEMENT": {"lot": 125, "sec": "सीमेंट", "step": 50}, "JSWSTEEL": {"lot": 675, "sec": "मेटल", "step": 10},
+    "JUBLFOOD": {"lot": 1250, "sec": "कंज्यूमर", "step": 10}, "KOTAKBANK": {"lot": 400, "sec": "बैंकिंग", "step": 20},
+    "LALPATHLAB": {"lot": 300, "sec": "हेल्थकेयर", "step": 50}, "LICHSGFIN": {"lot": 1000, "sec": "फाइनेंशियल", "step": 10},
+    "LT": {"lot": 150, "sec": "इंफ्रा", "step": 50}, "LTF": {"lot": 4462, "sec": "फाइनेंशियल", "step": 2},
+    "LTIM": {"lot": 150, "sec": "आईटी", "step": 50}, "LTTS": {"lot": 100, "sec": "आईटी", "step": 50},
+    "LUPIN": {"lot": 425, "sec": "फार्मा", "step": 20}, "M&M": {"lot": 350, "sec": "ऑटो", "step": 20},
+    "M&MFIN": {"lot": 2000, "sec": "फाइनेंशियल", "step": 5}, "MANAPPURAM": {"lot": 3000, "sec": "फाइनेंशियल", "step": 2},
+    "MARICO": {"lot": 1200, "sec": "एफएमसीजी", "step": 10}, "MARUTI": {"lot": 50, "sec": "ऑटो", "step": 100},
+    "MCDOWELL-N": {"lot": 700, "sec": "कंज्यूमर", "step": 20}, "MCX": {"lot": 200, "sec": "फाइनेंशियल", "step": 50},
+    "METROPOLIS": {"lot": 300, "sec": "हेल्थकेयर", "step": 20}, "MFSL": {"lot": 800, "sec": "फाइनेंशियल", "step": 20},
+    "MGL": {"lot": 400, "sec": "एनर्जी", "step": 20}, "MOTHERSON": {"lot": 6100, "sec": "ऑटो", "step": 2},
+    "MPHASIS": {"lot": 275, "sec": "आईटी", "step": 50}, "MRF": {"lot": 5, "sec": "ऑटो", "step": 500},
+    "MUTHOOTFIN": {"lot": 300, "sec": "फाइनेंशियल", "step": 20}, "NATIONALUM": {"lot": 5000, "sec": "मेटल", "step": 2},
+    "NAUKRI": {"lot": 125, "sec": "आईटी", "step": 50}, "NAVINFLUOR": {"lot": 175, "sec": "केमिकल्स", "step": 50},
+    "NESTLEIND": {"lot": 250, "sec": "एफएमसीजी", "step": 20}, "NMDC": {"lot": 4500, "sec": "माइनिंग", "step": 5},
+    "NTPC": {"lot": 1500, "sec": "पावर", "step": 5}, "OBEROIRLTY": {"lot": 350, "sec": "रियल्टी", "step": 20},
+    "OFSS": {"lot": 100, "sec": "आईटी", "step": 100}, "ONGC": {"lot": 3850, "sec": "एनर्जी", "step": 5},
+    "PAGEIND": {"lot": 15, "sec": "टेक्सटाइल", "step": 200}, "PEL": {"lot": 750, "sec": "फाइनेंशियल", "step": 10},
+    "PERSISTENT": {"lot": 100, "sec": "आईटी", "step": 50}, "PETRONET": {"lot": 3000, "sec": "एनर्जी", "step": 5},
+    "PFC": {"lot": 1300, "sec": "फाइनेंशियल", "step": 5}, "PIDILITIND": {"lot": 250, "sec": "केमिकल्स", "step": 20},
+    "PIIND": {"lot": 125, "sec": "केमिकल्स", "step": 50}, "PNB": {"lot": 4000, "sec": "बैंकिंग", "step": 2},
+    "POLYCAB": {"lot": 125, "sec": "केबल्स", "step": 50}, "POWERGRID": {"lot": 1800, "sec": "पावर", "step": 5},
+    "PVRINOX": {"lot": 407, "sec": "एंटरटेनमेंट", "step": 20}, "RAMCOCEM": {"lot": 850, "sec": "सीमेंट", "step": 10},
+    "RBLBANK": {"lot": 2500, "sec": "बैंकिंग", "step": 5}, "RECLTD": {"lot": 1500, "sec": "फाइनेंशियल", "step": 5},
+    "RELIANCE": {"lot": 250, "sec": "एनर्जी", "step": 20}, "SAIL": {"lot": 4750, "sec": "मेटल", "step": 2},
+    "SBICARD": {"lot": 800, "sec": "फाइनेंशियल", "step": 10}, "SBILIFE": {"lot": 750, "sec": "इंश्योरेंस", "step": 20},
+    "SBIN": {"lot": 750, "sec": "बैंकिंग", "step": 5}, "SHREECEM": {"lot": 25, "sec": "सीमेंट", "step": 200},
+    "SHRIRAMFIN": {"lot": 300, "sec": "फाइनेंशियल", "step": 50}, "SIEMENS": {"lot": 125, "sec": "कैपिटल गुड्स", "step": 50},
+    "SRF": {"lot": 375, "sec": "केमिकल्स", "step": 20}, "SUNPHARMA": {"lot": 350, "sec": "फार्मा", "step": 20},
+    "SUNTV": {"lot": 1500, "sec": "मीडिया", "step": 10}, "SYNGENE": {"lot": 1000, "sec": "फार्मा", "step": 10},
+    "TATACHEM": {"lot": 550, "sec": "केमिकल्स", "step": 20}, "TATACOMM": {"lot": 300, "sec": "टेलीकॉम", "step": 20},
+    "TATACONSUM": {"lot": 550, "sec": "एफएमसीजी", "step": 20}, "TATAMOTORS": {"lot": 575, "sec": "ऑटो", "step": 10},
+    "TATAPOWER": {"lot": 1687, "sec": "पावर", "step": 5}, "TATASTEEL": {"lot": 5500, "sec": "मेटल", "step": 1},
+    "TCS": {"lot": 175, "sec": "आईटी", "step": 50}, "TECHM": {"lot": 600, "sec": "आईटी", "step": 20},
+    "TITAN": {"lot": 175, "sec": "कंज्यूमर", "step": 50}, "TORNTPHARM": {"lot": 250, "sec": "फार्मा", "step": 50},
+    "TORNTPOWER": {"lot": 750, "sec": "पावर", "step": 20}, "TRENT": {"lot": 200, "sec": "रिटेल", "step": 50},
+    "TVSMOTOR": {"lot": 350, "sec": "ऑटो", "step": 20}, "UBL": {"lot": 400, "sec": "कंज्यूमर", "step": 20},
+    "ULTRACEMCO": {"lot": 100, "sec": "सीमेंट", "step": 100}, "UPL": {"lot": 1300, "sec": "केमिकल्स", "step": 10},
+    "VEDL": {"lot": 1150, "sec": "मेटल", "step": 5}, "VOLTAS": {"lot": 600, "sec": "कंज्यूमर", "step": 20},
+    "WIPRO": {"lot": 1500, "sec": "आईटी", "step": 10}, "ZEEL": {"lot": 3000, "sec": "मीडिया", "step": 5},
+    "ZYDUSLIFE": {"lot": 900, "sec": "फार्मा", "step": 20}
+}
 
 FNO_DATABASE = {
     "NIFTY": {"sec_id": "13", "lot": 25, "sector": "इंडेक्स", "step": 50, "yf": "^NSEI", "seg": "IDX_I"},
     "BANKNIFTY": {"sec_id": "25", "lot": 15, "sector": "इंडेक्स", "step": 100, "yf": "^NSEBANK", "seg": "IDX_I"},
     "FINNIFTY": {"sec_id": "27", "lot": 25, "sector": "इंडेक्स", "step": 50, "yf": "NIFTY_FIN_SERVICE.NS", "seg": "IDX_I"},
-    "MIDCPNIFTY": {"sec_id": "28", "lot": 50, "sector": "इंडेक्स", "step": 25, "yf": "^NSEMDCP50", "seg": "IDX_I"},
-    "AXISBANK": {"sec_id": "5900", "lot": 625, "sector": "बैंकिंग", "step": 10, "yf": "AXISBANK.NS", "seg": "NSE_EQ"},
-    "HDFCBANK": {"sec_id": "1333", "lot": 550, "sector": "बैंकिंग", "step": 10, "yf": "HDFCBANK.NS", "seg": "NSE_EQ"},
-    "ICICIBANK": {"sec_id": "4963", "lot": 700, "sector": "बैंकिंग", "step": 10, "yf": "ICICIBANK.NS", "seg": "NSE_EQ"},
-    "SBIN": {"sec_id": "3045", "lot": 750, "sector": "बैंकिंग", "step": 5, "yf": "SBIN.NS", "seg": "NSE_EQ"},
-    "KOTAKBANK": {"sec_id": "1922", "lot": 400, "sector": "बैंकिंग", "step": 20, "yf": "KOTAKBANK.NS", "seg": "NSE_EQ"},
-    "RELIANCE": {"sec_id": "2885", "lot": 250, "sector": "एनर्जी", "step": 20, "yf": "RELIANCE.NS", "seg": "NSE_EQ"},
-    "TCS": {"sec_id": "11536", "lot": 175, "sector": "आईटी", "step": 50, "yf": "TCS.NS", "seg": "NSE_EQ"},
-    "INFY": {"sec_id": "1594", "lot": 400, "sector": "आईटी", "step": 20, "yf": "INFY.NS", "seg": "NSE_EQ"},
-    "TATAMOTORS": {"sec_id": "3456", "lot": 575, "sector": "ऑटो", "step": 10, "yf": "TATAMOTORS.NS", "seg": "NSE_EQ"},
-    "TATASTEEL": {"sec_id": "3499", "lot": 5500, "sector": "मेटल", "step": 1, "yf": "TATASTEEL.NS", "seg": "NSE_EQ"},
-    "MARUTI": {"sec_id": "10999", "lot": 50, "sector": "ऑटो", "step": 100, "yf": "MARUTI.NS", "seg": "NSE_EQ"},
-    "BAJFINANCE": {"sec_id": "317", "lot": 125, "sector": "फाइनेंशियल", "step": 50, "yf": "BAJFINANCE.NS", "seg": "NSE_EQ"}
+    "MIDCPNIFTY": {"sec_id": "28", "lot": 50, "sector": "इंडेक्स", "step": 25, "yf": "^NSEMDCP50", "seg": "IDX_I"}
 }
 
+# 200+ F&O स्टॉक्स को डेटाबेस में लोड करना
+for sym, info in FNO_RAW_MAP.items():
+    FNO_DATABASE[sym] = {
+        "sec_id": "0",
+        "lot": info["lot"],
+        "sector": info["sec"],
+        "step": info["step"],
+        "yf": f"{sym}.NS",
+        "seg": "NSE_EQ"
+    }
+
 ALL_ASSETS = sorted(list(FNO_DATABASE.keys()))
+ALL_FNO_STOCKS = sorted(list(FNO_RAW_MAP.keys()))
 
 ALL_SECTOR_INDICES = {
     "निफ्टी 50 (Nifty 50)": "^NSEI",
@@ -236,27 +333,7 @@ ALL_SECTOR_INDICES = {
     "निफ्टी इंफ्रा (Infra)": "^CNXINFRA"
 }
 
-STOCK_SECTOR_MAP = {
-    "HDFCBANK": "बैंकिंग", "ICICIBANK": "बैंकिंग", "SBIN": "बैंकिंग", "AXISBANK": "बैंकिंग",
-    "KOTAKBANK": "बैंकिंग", "INDUSINDBK": "बैंकिंग", "BANKBARODA": "बैंकिंग", "PNB": "बैंकिंग",
-    "BAJFINANCE": "फाइनेंशियल", "BAJAJFINSV": "फाइनेंशियल", "CHOLAFIN": "फाइनेंशियल", "MUTHOOTFIN": "फाइनेंशियल",
-    "PFC": "फाइनेंशियल", "RECLTD": "फाइनेंशियल", "SHRIRAMFIN": "फाइनेंशियल", "MOTILALOFS": "फाइनेंशियल",
-    "TCS": "आईटी", "INFY": "आईटी", "HCLTECH": "आईटी", "WIPRO": "आईटी", "TECHM": "आईटी", 
-    "LTIM": "आईटी", "COFORGE": "आईटी", "PERSISTENT": "आईटी", "MPHASIS": "आईटी", "NAUKRI": "आईटी",
-    "TATAMOTORS": "ऑटो", "MARUTI": "ऑटो", "M&M": "ऑटो", "BAJAJ-AUTO": "ऑटो", 
-    "HEROMOTOCO": "ऑटो", "EICHERMOT": "ऑटो", "TVSMOTOR": "ऑटो", "BHARATFORG": "ऑटो", 
-    "TATASTEEL": "मेटल", "JSWSTEEL": "मेटल", "HINDALCO": "मेटल", "JINDALSTEL": "मेटल", 
-    "VEDL": "मेटल", "COALINDIA": "मेटल", "NMDC": "मेटल", "SAIL": "मेटल",
-    "RELIANCE": "एनर्जी/ऑइल", "BPCL": "एनर्जी/ऑइल", "IOC": "एनर्जी/ऑइल", "ONGC": "एनर्जी/ऑइल", 
-    "NTPC": "पावर", "POWERGRID": "पावर", "TATAPOWER": "पावर", "ADANIENT": "एनर्जी",
-    "SUNPHARMA": "फार्मा", "CIPLA": "फार्मा", "DRREDDY": "फार्मा", "DIVISLAB": "फार्मा",
-    "ITC": "एफएमसीजी", "HINDUNILVR": "एफएमसीजी", "NESTLEIND": "एफएमसीजी", "BRITANNIA": "एफएमसीजी",
-    "LT": "इंफ्रा", "ULTRACEMCO": "सीमेंट", "GRASIM": "सीमेंट", "POLYCAB": "केबल्स"
-}
-
-ALL_FNO_STOCKS = sorted(list(STOCK_SECTOR_MAP.keys()))
-
-# ================= 6. Research Helper Functions =================
+# ================= 6. Research Engine =================
 def fetch_rss_feed(query, limit=10):
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     results = []
@@ -333,40 +410,31 @@ def scan_sector_item(item):
 def analyze_stock_full(symbol):
     ticker = f"{symbol}.NS"
     score = 0.0
+    meta = FNO_RAW_MAP.get(symbol, {"sec": "अन्य"})
     details = {
-        "शेयर": symbol, "सेक्टर": STOCK_SECTOR_MAP.get(symbol, "अन्य"), "भाव (₹)": 0.0,
-        "तकनीकी रुझान": "⚪ न्यूट्रल", "ट्विटर पल्स": "⚪ सामान्य", "रिजल्ट/खबरें": "⚪ सामान्य", "कुल स्कोर": 0.0
+        "शेयर": symbol, "सेक्टर": meta["sec"], "भाव (₹)": 0.0,
+        "तकनीकी रुझान": "⚪ न्यूट्रल", "ट्विटर पल्स": "⚪ सामान्य", "कुल स्कोर": 0.0
     }
     try:
-        daily = yf.download(ticker, period="6mo", interval="1d", progress=False)
+        daily = yf.download(ticker, period="3mo", interval="1d", progress=False)
         if isinstance(daily.columns, pd.MultiIndex):
             daily.columns = daily.columns.get_level_values(0)
             
-        if len(daily) >= 25:
+        if len(daily) >= 20:
             cmp_val = round(float(daily['Close'].iloc[-1]), 2)
             pdh = round(float(daily['High'].iloc[-2]), 2)
             pdl = round(float(daily['Low'].iloc[-2]), 2)
             ema20 = round(float(daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
             details["भाव (₹)"] = cmp_val
 
-            intra = yf.download(ticker, period="1d", interval="5m", progress=False)
-            if isinstance(intra.columns, pd.MultiIndex):
-                intra.columns = intra.columns.get_level_values(0)
-
             tech_points = 0.0
-            if not intra.empty and 'Volume' in intra and intra['Volume'].sum() > 0:
-                typ = (intra['High'] + intra['Low'] + intra['Close']) / 3
-                vwap = float((typ * intra['Volume']).sum() / intra['Volume'].sum())
-                if cmp_val >= vwap: tech_points += 1.5
-                else: tech_points -= 1.5
-
             if cmp_val > pdh: tech_points += 2.0
             elif cmp_val < pdl: tech_points -= 2.0
             if cmp_val >= ema20: tech_points += 1.0
             else: tech_points -= 1.0
 
             score += tech_points
-            details["तकनीकी रुझान"] = "🟢 मजबूत" if tech_points > 1.5 else ("🔴 कमजोर" if tech_points < -1.5 else "⚪ न्यूट्रल")
+            details["तकनीकी रुझान"] = "🟢 मजबूत" if tech_points > 1.0 else ("🔴 कमजोर" if tech_points < -1.0 else "⚪ न्यूट्रल")
 
             tw_status, tw_pts = fetch_twitter_pulse(symbol)
             score += tw_pts
@@ -377,7 +445,7 @@ def analyze_stock_full(symbol):
     except Exception:
         return None
 
-# ================= 7. Live Option Strikes Engine =================
+# ================= 7. Option Strike Generator =================
 def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
     atm = round(cmp_val / step) * step
     strikes = []
@@ -385,7 +453,7 @@ def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
         strikes.append(int(atm + (i * step)))
     return strikes, atm
 
-# ================= 8. Chart Engine (Mobile Pinch-Zoom Fixed & Indented) =================
+# ================= 8. Chart Engine (Smooth Mobile Pinch-Zoom) =================
 def compute_heikin_ashi(df):
     ha = pd.DataFrame(index=df.index)
     ha['Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4.0
@@ -493,11 +561,7 @@ def render_zoomable_chart(symbol, yf_ticker):
         st.plotly_chart(
             fig,
             use_container_width=True,
-            config={
-                "scrollZoom": True,
-                "displayModeBar": False,
-                "doubleClick": "reset"
-            }
+            config={"scrollZoom": True, "displayModeBar": False, "doubleClick": "reset"}
         )
         st.markdown('</div>', unsafe_allow_html=True)
     except Exception:
@@ -530,7 +594,7 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
                     st.session_state["selected_fno_asset"] = st.session_state["asset_select_key"]
                 
                 selected_asset = st.selectbox(
-                    "Underlying Asset (शेयर / इंडेक्स):",
+                    f"Underlying Asset ({len(ALL_ASSETS)} F&O स्टॉक्स व इंडेक्स उपलब्ध):",
                     ALL_ASSETS,
                     index=ALL_ASSETS.index(target_asset),
                     key="asset_select_key",
@@ -702,7 +766,7 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
 st.write("---")
 st.subheader("🔍 संपूर्ण मार्केट रिसर्च व इंटेलिजेंस हब (6 भाग)")
 
-# भाग 1: सभी इंडेक्स व सेक्टर्स का ट्रेंड
+# भाग 1: सभी इंडेक्स व सेक्टर्स का ट्रेंड (Session State Locked)
 with st.expander("🏛️ भाग 1: सभी सेक्टर्स व इंडेक्स का लाइव ट्रेंड (तेजी vs मंदी)", expanded=False):
     st.write("**निफ्टी 50, बैंक निफ्टी, आईटी, ऑटो, मेटल, फार्मा, रियल्टी आदि का लाइव स्टेटस:**")
     if st.button("📊 सभी इंडेक्स व सेक्टर्स स्कैन करें", use_container_width=True, key="btn_scan_sectors"):
@@ -713,13 +777,15 @@ with st.expander("🏛️ भाग 1: सभी सेक्टर्स व �
                 for r in res:
                     if r: sec_results.append(r)
             if sec_results:
-                sdf = pd.DataFrame(sec_results)
-                st.dataframe(sdf, use_container_width=True, hide_index=True)
+                st.session_state["sector_scan_data"] = pd.DataFrame(sec_results)
 
-# भाग 2: मल्टी-फैक्टर टॉप 5 बुलिश और बेयरिश शेयर (Twitter Pulse + Tech + News)
+    if st.session_state.get("sector_scan_data") is not None:
+        st.dataframe(st.session_state["sector_scan_data"], use_container_width=True, hide_index=True)
+
+# भाग 2: मल्टी-फैक्टर टॉप 5 बुलिश और बेयरिश शेयर (Session State Locked)
 with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेयरिश शेयर (Twitter/X + VWAP + 20 EMA)", expanded=False):
     st.write("**Twitter/X पल्स + तकनीकी आंकड़े (VWAP, PDH/PDL, 20 EMA) + कॉर्पोरेट खबरों के आधार पर टॉप 5:**")
-    scan_limit = st.slider("स्कैन करने के लिए F&O शेयरों की संख्या:", min_value=10, max_value=len(ALL_FNO_STOCKS), value=15, step=5)
+    scan_limit = st.slider("स्कैन करने के लिए F&O शेयरों की संख्या:", min_value=10, max_value=len(ALL_FNO_STOCKS), value=20, step=5)
     if st.button("🔥 मल्टी-फैक्टर मार्केट व Twitter पल्स स्कैन शुरू करें", use_container_width=True, key="btn_deep_analysis"):
         with st.spinner(f"{scan_limit} F&O शेयरों का गहन विश्लेषण व Twitter पल्स स्कैन चल रहा है..."):
             stock_sublist = ALL_FNO_STOCKS[:scan_limit]
@@ -731,13 +797,17 @@ with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेय�
             if analysis_data:
                 mdf = pd.DataFrame(analysis_data)
                 sorted_df = mdf.sort_values(by="कुल स्कोर", ascending=False)
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.success("🟢 **शीर्ष बुलिश शेयर (Twitter + Tech)**")
-                    st.dataframe(sorted_df.head(5)[["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "ट्विटर पल्स", "कुल स्कोर"]], use_container_width=True, hide_index=True)
-                with col_b:
-                    st.error("🔴 **शीर्ष बेयरिश शेयर (Twitter + Tech)**")
-                    st.dataframe(sorted_df.tail(5).iloc[::-1][["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "ट्विटर पल्स", "कुल स्कोर"]], use_container_width=True, hide_index=True)
+                st.session_state["top5_scan_data"] = sorted_df
+
+    if st.session_state.get("top5_scan_data") is not None:
+        sorted_df = st.session_state["top5_scan_data"]
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.success("🟢 **शीर्ष बुलिश शेयर (Twitter + Tech)**")
+            st.dataframe(sorted_df.head(5)[["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "ट्विटर पल्स", "कुल स्कोर"]], use_container_width=True, hide_index=True)
+        with col_b:
+            st.error("🔴 **शीर्ष बेयरिश शेयर (Twitter + Tech)**")
+            st.dataframe(sorted_df.tail(5).iloc[::-1][["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "ट्विटर पल्स", "कुल स्कोर"]], use_container_width=True, hide_index=True)
 
 # भाग 3: तिमाही कॉर्पोरेट नतीजे व वर्डिक्ट
 with st.expander("📊 भाग 3: कॉर्पोरेट रिजल्ट्स व अर्निंग्स वर्डिक्ट (Quarterly PAT/Revenue)", expanded=False):
