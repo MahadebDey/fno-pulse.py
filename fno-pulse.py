@@ -30,7 +30,7 @@ except ImportError:
 
 # ================= 1. Page Configuration & CSS =================
 st.set_page_config(
-    page_title="महादेब स्टॉक रिसर्च व F&O टर्मिनल",
+    page_title="महादेब F&O प्रो टर्मिनल",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -70,7 +70,7 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
 if not st.session_state["authenticated"]:
-    st.title("🔐 महादेब स्टॉक रिसर्च व F&O टर्मिनल")
+    st.title("🔐 महादेब F&O रिसर्च व ट्रेडिंग पोर्टल")
     st.subheader("सुरक्षित गेटवे एक्सेस")
     with st.form("login_form"):
         pin_input = st.text_input("मास्टर पिन दर्ज करें:", type="password", placeholder="******")
@@ -256,7 +256,7 @@ STOCK_SECTOR_MAP = {
 
 ALL_FNO_STOCKS = sorted(list(STOCK_SECTOR_MAP.keys()))
 
-# ================= 6. Research Helper Functions (Feeds, Twitter, Multi-factor) =================
+# ================= 6. Research Helper Functions =================
 def fetch_rss_feed(query, limit=10):
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     results = []
@@ -279,7 +279,6 @@ def fetch_rss_feed(query, limit=10):
     return results
 
 def fetch_twitter_pulse(symbol):
-    """ट्विटर/X और सोशल मीडिया ट्रेंड पल्स स्कैनिंग"""
     feed = fetch_rss_feed(f"{symbol}+share+(Twitter+OR+X+OR+breakout+OR+target)", limit=3)
     if not feed:
         return "⚪ सामान्य (Neutral)", 0.0
@@ -369,7 +368,6 @@ def analyze_stock_full(symbol):
             score += tech_points
             details["तकनीकी रुझान"] = "🟢 मजबूत" if tech_points > 1.5 else ("🔴 कमजोर" if tech_points < -1.5 else "⚪ न्यूट्रल")
 
-            # ट्विटर / सोशल मीडिया पल्स
             tw_status, tw_pts = fetch_twitter_pulse(symbol)
             score += tw_pts
             details["ट्विटर पल्स"] = tw_status
@@ -379,7 +377,7 @@ def analyze_stock_full(symbol):
     except Exception:
         return None
 
-# ================= 7. Live Option Chain & Strikes Engine =================
+# ================= 7. Live Option Strikes Engine =================
 def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
     atm = round(cmp_val / step) * step
     strikes = []
@@ -387,7 +385,7 @@ def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
         strikes.append(int(atm + (i * step)))
     return strikes, atm
 
-# ================= 8. Chart Engine =================
+# ================= 8. Chart Engine (Mobile Pinch-Zoom Fixed & Indented) =================
 def compute_heikin_ashi(df):
     ha = pd.DataFrame(index=df.index)
     ha['Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4.0
@@ -401,41 +399,19 @@ def compute_heikin_ashi(df):
     return ha
 
 def render_zoomable_chart(symbol, yf_ticker):
-    fig.update_layout(
-            title=dict(
-                text=f"<b>{symbol}</b> | {label_name} ({tf.upper()}) | {'+' if is_positive else ''}{pct_change:.2f}%",
-                font=dict(size=14, color="#FFFFFF"),
-                x=0.01,
-                y=0.98
-            ),
-            template="plotly_dark",
-            height=420,
-            margin=dict(l=10, r=10, t=30, b=30),
-            xaxis_rangeslider_visible=False,
-            dragmode="pan",  # मोबाइल पर बॉक्स बनने के बजाय स्मूथ स्क्रॉल और पिंच-ज़ूम होगा
-            legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5)
-        )
+    tf = st.session_state.get("chart_tf", "5m")
+    ctype = st.session_state.get("chart_type", "Regular Candlestick")
+    show_ema = st.session_state.get("chart_show_ema", True)
 
-        if tf in ["1m", "5m", "15m"]:
-            fig.update_xaxes(
-                rangebreaks=[
-                    dict(bounds=["sat", "mon"]),
-                    dict(bounds=[15.67, 9.25], pattern="hour")
-                ]
-            )
+    tf_params = {
+        "1m": {"period": "2d", "interval": "1m"},
+        "5m": {"period": "5d", "interval": "5m"},
+        "15m": {"period": "10d", "interval": "15m"},
+        "1h": {"period": "1mo", "interval": "60m"},
+        "1d": {"period": "6mo", "interval": "1d"}
+    }
+    cfg = tf_params.get(tf, {"period": "5d", "interval": "5m"})
 
-        st.markdown(f'<div class="{border_class}">', unsafe_allow_html=True)
-        # scrollZoom और touch gesture को एक्टिव रखने के लिए config
-        st.plotly_chart(
-            fig, 
-            use_container_width=True, 
-            config={
-                "scrollZoom": True,
-                "displayModeBar": False,
-                "doubleClick": "reset"
-            }
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
     try:
         data = yf.download(yf_ticker, period=cfg["period"], interval=cfg["interval"], progress=False)
         if isinstance(data.columns, pd.MultiIndex):
@@ -501,7 +477,7 @@ def render_zoomable_chart(symbol, yf_ticker):
             height=420,
             margin=dict(l=10, r=10, t=30, b=30),
             xaxis_rangeslider_visible=False,
-            dragmode="zoom",
+            dragmode="pan",
             legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5)
         )
 
@@ -514,7 +490,15 @@ def render_zoomable_chart(symbol, yf_ticker):
             )
 
         st.markdown(f'<div class="{border_class}">', unsafe_allow_html=True)
-        st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": False})
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            config={
+                "scrollZoom": True,
+                "displayModeBar": False,
+                "doubleClick": "reset"
+            }
+        )
         st.markdown('</div>', unsafe_allow_html=True)
     except Exception:
         st.info(f"{symbol}: लाइव डेटा उपलब्ध नहीं है।")
@@ -714,7 +698,7 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
 
         render_zoomable_chart(target_asset, meta_info["yf"])
 
-# ================= 10. REINSTATED: COMPLETE 6-PART MARKET RESEARCH INTERFACE =================
+# ================= 10. COMPLETE 6-PART MARKET RESEARCH INTERFACE =================
 st.write("---")
 st.subheader("🔍 संपूर्ण मार्केट रिसर्च व इंटेलिजेंस हब (6 भाग)")
 
