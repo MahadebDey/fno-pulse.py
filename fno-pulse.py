@@ -532,36 +532,33 @@ def analyze_stock_full(symbol):
     except Exception:
         return None
 
-# ================= 9. Strategy Scanner Engine (Including Stock Option Buying) =================
+# ================= 9. Comprehensive Strategy Scanner Engine =================
 def scan_stock_strategy(item, strategy_name):
     symbol, meta = item
     try:
-        # 3-Minute Resampled Data for High Accuracy
+        # 3-Minute Resampled Data
         df = load_and_resample_ohlc(meta["yf"], "3m")
-        if df.empty or len(df) < 10: 
+        if df.empty or len(df) < 15: 
             return None
 
         cmp_val = round(float(df['Close'].iloc[-1]), 2)
         signal = "⚪ NO SIGNAL"
         reason = ""
 
-        # Daily Data for PDH/PDL and Open Price
+        # Daily Data for PDH, PDL, Today Open
         daily = yf.download(meta["yf"], period="5d", interval="1d", progress=False)
         if isinstance(daily.columns, pd.MultiIndex):
             daily.columns = daily.columns.get_level_values(0)
 
-        # ---------------- 1. PDH / PDL Breakout + 2x Volume (Option Buying) ----------------
+        # ---------------- 1. PDH / PDL Breakout + 2x Volume ----------------
         if "PDH / PDL" in strategy_name:
             if len(daily) >= 2:
                 pdh = float(daily['High'].iloc[-2])
                 pdl = float(daily['Low'].iloc[-2])
-                
-                # Volume Condition (2x of last 5 candles avg)
                 avg_vol = df['Volume'].iloc[-6:-1].mean()
                 curr_vol = df['Volume'].iloc[-1]
                 vol_blast = curr_vol >= (avg_vol * 1.8) if avg_vol > 0 else True
                 
-                # VWAP Calculation
                 typ = (df['High'] + df['Low'] + df['Close']) / 3
                 vwap = (typ * df['Volume']).cumsum() / df['Volume'].cumsum()
                 curr_vwap = float(vwap.iloc[-1])
@@ -580,20 +577,106 @@ def scan_stock_strategy(item, strategy_name):
                 today_low = float(daily['Low'].iloc[-1])
                 today_high = float(daily['High'].iloc[-1])
                 
-                # Open == Low (CE Buying)
                 if abs(today_open - today_low) <= (today_open * 0.001):
                     if cmp_val > df['High'].iloc[:3].max():
                         signal = "🟢 BUY ATM CALL (Open=Low Momentum)"
                         reason = f"ओपन = लो (₹{today_open:.1f}) + 3-मिनट हाई ब्रेक"
-                
-                # Open == High (PE Buying)
                 elif abs(today_open - today_high) <= (today_open * 0.001):
                     if cmp_val < df['Low'].iloc[:3].min():
                         signal = "🔴 BUY ATM PUT (Open=High Breakdown)"
                         reason = f"ओपन = हाई (₹{today_open:.1f}) + 3-मिनट लो ब्रेक"
 
-        # ---------------- 3. 3-Minute Heikin-Ashi 3-Streak ----------------
-        elif "3-Minute" in strategy_name or "Heikin-Ashi" in strategy_name:
+        # ---------------- 3. 15-Min ORB + 3-Min Retest ----------------
+        elif "15-Min ORB" in strategy_name:
+            df_15 = yf.download(meta["yf"], period="1d", interval="15m", progress=False)
+            if isinstance(df_15.columns, pd.MultiIndex):
+                df_15.columns = df_15.columns.get_level_values(0)
+            if not df_15.empty and len(df_15) >= 2:
+                orb_h = float(df_15['High'].iloc[0])
+                orb_l = float(df_15['Low'].iloc[0])
+                if cmp_val > orb_h and float(df['Low'].iloc[-1]) <= (orb_h * 1.002):
+                    signal = "🟢 BUY ATM CALL (ORB 15m Retest Bounce)"
+                    reason = f"15-Min ORB High (₹{orb_h:.1f}) ब्रेक + रीटेस्ट बाउंस"
+                elif cmp_val < orb_l and float(df['High'].iloc[-1]) >= (orb_l * 0.998):
+                    signal = "🔴 BUY ATM PUT (ORB 15m Retest Breakdown)"
+                    reason = f"15-Min ORB Low (₹{orb_l:.1f}) ब्रेकडाउन + रीटेस्ट रिजेक्शन"
+
+        # ---------------- 4. Bollinger Band Squeeze & Blast ----------------
+        elif "Bollinger Band" in strategy_name:
+            sma20 = df['Close'].rolling(20).mean()
+            std20 = df['Close'].rolling(20).std()
+            upper_bb = sma20 + (2 * std20)
+            lower_bb = sma20 - (2 * std20)
+            bb_width = (upper_bb - lower_bb) / sma20
+            
+            avg_vol = df['Volume'].iloc[-6:-1].mean()
+            vol_surge = df['Volume'].iloc[-1] >= (avg_vol * 2.0) if avg_vol > 0 else True
+
+            if cmp_val > upper_bb.iloc[-1] and vol_surge:
+                signal = "🟢 BUY ATM CALL (BB Squeeze Blast)"
+                reason = "अपर बोलिंजर बैंड ब्लास्ट + 2x वॉल्यूम उछाल"
+            elif cmp_val < lower_bb.iloc[-1] and vol_surge:
+                signal = "🔴 BUY ATM PUT (BB Squeeze Breakdown)"
+                reason = "लोअर बोलिंजर बैंड ब्रेकडाउन + 2x वॉल्यूम"
+
+        # ---------------- 5. Inside Bar (NR4) Momentum Breakout ----------------
+        elif "Inside Bar" in strategy_name:
+            # Mother Bar: iloc[-3], Inside Bar: iloc[-2], Breakout: iloc[-1]
+            mother_h = float(df['High'].iloc[-3])
+            mother_l = float(df['Low'].iloc[-3])
+            baby_h = float(df['High'].iloc[-2])
+            baby_l = float(df['Low'].iloc[-2])
+
+            is_inside = (baby_h <= mother_h) and (baby_l >= mother_l)
+            if is_inside:
+                if cmp_val > baby_h:
+                    signal = "🟢 BUY ATM CALL (Inside Bar Breakout)"
+                    reason = f"इनसाइड बार हाई (₹{baby_h:.1f}) तोड़ा (Tight SL Setup)"
+                elif cmp_val < baby_l:
+                    signal = "🔴 BUY ATM PUT (Inside Bar Breakdown)"
+                    reason = f"इनसाइड बार लो (₹{baby_l:.1f}) तोड़ा (Tight SL Setup)"
+
+        # ---------------- 6. RSI (60-40) Momentum Shift + VWAP ----------------
+        elif "RSI (60-40)" in strategy_name:
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / (loss + 1e-9)
+            rsi = (100 - (100 / (1 + rs))).dropna()
+            
+            typ = (df['High'] + df['Low'] + df['Close']) / 3
+            vwap = (typ * df['Volume']).cumsum() / df['Volume'].cumsum()
+            curr_vwap = float(vwap.iloc[-1])
+
+            if len(rsi) >= 2:
+                curr_rsi = rsi.iloc[-1]
+                prev_rsi = rsi.iloc[-2]
+                if prev_rsi < 60 and curr_rsi >= 60 and cmp_val > curr_vwap:
+                    signal = "🟢 BUY ATM CALL (RSI 60+ Super Momentum)"
+                    reason = f"RSI क्रॉस 60 ({curr_rsi:.1f}) + VWAP के ऊपर"
+                elif prev_rsi > 40 and curr_rsi <= 40 and cmp_val < curr_vwap:
+                    signal = "🔴 BUY ATM PUT (RSI 40- Super Bearish)"
+                    reason = f"RSI 40 से नीचे ({curr_rsi:.1f}) + VWAP के नीचे"
+
+        # ---------------- 7. Supertrend (7, 3) + 9 EMA Double Confirmation ----------------
+        elif "Supertrend" in strategy_name:
+            hl2 = (df['High'] + df['Low']) / 2
+            tr = pd.concat([df['High'] - df['Low'], (df['High'] - df['Close'].shift()).abs(), (df['Low'] - df['Close'].shift()).abs()], axis=1).max(axis=1)
+            atr = tr.rolling(7).mean()
+            upperband = hl2 + (3 * atr)
+            lowerband = hl2 - (3 * atr)
+            ema9 = df['Close'].ewm(span=9, adjust=False).mean()
+
+            # Simple Bullish / Bearish Supertrend condition
+            if cmp_val > upperband.iloc[-1] and cmp_val > ema9.iloc[-1]:
+                signal = "🟢 BUY ATM CALL (Supertrend + 9 EMA Bullish)"
+                reason = "सुपरट्रेंड ग्रीन + 9 EMA के ऊपर मजबूत कैंडल"
+            elif cmp_val < lowerband.iloc[-1] and cmp_val < ema9.iloc[-1]:
+                signal = "🔴 BUY ATM PUT (Supertrend + 9 EMA Bearish)"
+                reason = "सुपरट्रेंड रेड + 9 EMA के नीचे ब्रेकडाउन"
+
+        # ---------------- 8. 3-Minute Heikin-Ashi 3-Streak ----------------
+        elif "3-Minute Heikin-Ashi" in strategy_name:
             ha = compute_heikin_ashi(df)
             c1_bull = ha['Close'].iloc[-1] > ha['Open'].iloc[-1]
             c2_bull = ha['Close'].iloc[-2] > ha['Open'].iloc[-2]
@@ -610,7 +693,7 @@ def scan_stock_strategy(item, strategy_name):
                 signal = "🔴 BEARISH ENTRY (3 Red HA Streak)"
                 reason = "3-मिनट पर लगातार 3 मजबूत लाल कैंडल्स"
 
-        # ---------------- 4. 9 EMA Breakout ----------------
+        # ---------------- 9. 9 EMA Breakout ----------------
         elif "9 EMA" in strategy_name:
             ema9 = df['Close'].ewm(span=9, adjust=False).mean()
             if df['Close'].iloc[-2] <= ema9.iloc[-2] and cmp_val > ema9.iloc[-1]:
@@ -620,7 +703,7 @@ def scan_stock_strategy(item, strategy_name):
                 signal = "🔴 SELL (9 EMA Breakdown)"
                 reason = "भाव ने 9 EMA को ऊपर से नीचे तोड़ा"
 
-        # ---------------- 5. VWAP Breakout ----------------
+        # ---------------- 10. VWAP Breakout ----------------
         elif "VWAP" in strategy_name:
             typ = (df['High'] + df['Low'] + df['Close']) / 3
             vwap = (typ * df['Volume']).cumsum() / df['Volume'].cumsum()
@@ -959,8 +1042,8 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
 
         render_zoomable_chart(target_asset, meta_info["yf"])
 
-# ================= 12. F&O LIVE STRATEGY SCANNER (Option Buying Enabled) =================
-with st.expander("🎯 F&O लाइव स्ट्रैटेजी स्कैनर (Stock Option Buying & Momemtum)", expanded=False):
+# ================= 12. F&O LIVE STRATEGY SCANNER (Comprehensive Pro-Level Options) =================
+with st.expander("🎯 F&O लाइव स्ट्रैटेजी स्कैनर (Stock Option Buying & Momentum Engine)", expanded=False):
     c_strat1, c_strat2 = st.columns([2, 1])
     with c_strat1:
         selected_strategy = st.selectbox(
@@ -968,6 +1051,11 @@ with st.expander("🎯 F&O लाइव स्ट्रैटेजी स्क
             [
                 "🚀 PDH / PDL ब्रेकआउट + 2x वॉल्यूम ब्लास्ट (High Probability Option Buying)",
                 "⚡ Open = Low (CE Buy) / Open = High (PE Buy) मोमेंटम स्कैनर",
+                "⏱️ 15-Min ORB + 3-Min Retest Bounce (Opening Range Option Buying)",
+                "💥 Bollinger Band Squeeze & 2x Volume Blast (Range Breakout)",
+                "📦 Inside Bar (NR4) Momentum Breakout (Tight SL Option Scalp)",
+                "⚡ RSI (60-40) Super Momentum Shift + VWAP Rider",
+                "🛡️ Supertrend (7, 3) + 9 EMA Double Confirmation Scalp",
                 "🔥 3-Minute Heikin-Ashi 3-Candle Streak (Green=Entry / Red=Bearish)",
                 "📈 9 EMA ब्रेकआउट / रिवर्सल (Scalp & Intraday)",
                 "🌊 VWAP मोमेंटम ब्रेकआउट (Institutional Trend)"
