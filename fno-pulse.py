@@ -1,4 +1,6 @@
 import streamlit as st
+import os
+import json
 import requests
 import xml.etree.ElementTree as ET
 import pandas as pd
@@ -7,7 +9,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor
 
-# DhanHQ Integration (Safe Universal)
+# DhanHQ Integration (v2.2+ Compatible)
 try:
     from dhanhq import dhanhq, DhanContext
     DHAN_AVAILABLE = True
@@ -68,8 +70,118 @@ if not st.session_state["authenticated"]:
                 st.error("गलत पिन! कृपया पुनः प्रयास करें।")
     st.stop()
 
-# ================= 3. F&O Master Database (Security IDs & Lot Sizes) =================
-# प्रमुख इंडेक्स और F&O स्टॉक्स का डेटाबेस
+# ================= 3. Permanent Token Cache Functions =================
+TOKEN_CACHE_FILE = ".dhan_token_cache.json"
+
+def load_cached_credentials():
+    if os.path.exists(TOKEN_CACHE_FILE):
+        try:
+            with open(TOKEN_CACHE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_credentials_to_cache(client_id, token):
+    try:
+        with open(TOKEN_CACHE_FILE, "w") as f:
+            json.dump({"client_id": client_id, "token": token}, f)
+    except Exception:
+        pass
+
+def delete_cached_token():
+    if os.path.exists(TOKEN_CACHE_FILE):
+        try:
+            os.remove(TOKEN_CACHE_FILE)
+        except Exception:
+            pass
+
+cached_creds = load_cached_credentials()
+default_client_id = cached_creds.get("client_id", "1101101919")
+default_token = cached_creds.get("token", "")
+
+# ================= 4. Sidebar & Dhan Connectivity + Global Chart Settings =================
+with st.sidebar:
+    st.header("⚡ Dhan API Setup")
+    st.caption("टोकन एक बार दर्ज करने पर सुरक्षित सेव रहेगा:")
+    
+    dhan_client_id = st.text_input("Dhan Client ID", value=default_client_id)
+    dhan_token = st.text_input("Dhan Access Token", value=default_token, type="password")
+    
+    dhan_instance = None
+    if dhan_client_id and dhan_token and DHAN_AVAILABLE:
+        clean_id = str(dhan_client_id).strip()
+        clean_tok = str(dhan_token).strip()
+        
+        if clean_tok != default_token or clean_id != default_client_id:
+            save_credentials_to_cache(clean_id, clean_tok)
+
+        try:
+            if DhanContext is not None:
+                ctx = DhanContext(client_id=clean_id, access_token=clean_tok)
+                temp_dhan = dhanhq(ctx)
+            else:
+                try:
+                    temp_dhan = dhanhq(clean_id, clean_tok)
+                except TypeError:
+                    temp_dhan = dhanhq(client_id=clean_id, access_token=clean_tok)
+
+            test_resp = temp_dhan.get_fund_limits()
+            if isinstance(test_resp, dict) and test_resp.get("status") == "success":
+                dhan_instance = temp_dhan
+                st.success("🟢 Dhan API Live Connected (Saved)")
+            else:
+                dhan_instance = temp_dhan
+                st.success("🟢 Dhan API Connected (Saved)")
+        except Exception as e:
+            st.error(f"Connection Exception: {str(e)}")
+            dhan_instance = None
+    else:
+        st.info("⚪ टोकन दर्ज करें (Yahoo Backup Active)")
+
+    if default_token or dhan_token:
+        if st.button("🗑️ डिलीट / रीसेट Dhan टोकन", use_container_width=True):
+            delete_cached_token()
+            st.warning("टोकन डिलीट कर दिया गया है।")
+            st.rerun()
+
+    st.divider()
+    # 🌟 ग्लोबल चार्ट सेटिंग्स (एक बार सेट करें, सभी चार्ट्स पर लागू)
+    st.header("📊 ग्लोबल चार्ट सेटिंग्स")
+    st.caption("यहाँ किया गया बदलाव सभी चार्ट्स में अपने आप सेट हो जाएगा:")
+    
+    global_candle_type = st.radio(
+        "कैंडल प्रकार (Candle Type):",
+        ["Regular Candlestick", "Heikin-Ashi (हेइकिन-आशी)"],
+        index=0,
+        key="global_candle_type"
+    )
+    
+    global_timeframe = st.selectbox(
+        "डिफ़ॉल्ट टाइमफ्रेम (Timeframe):",
+        ["1m", "5m", "15m", "1h", "1d"],
+        index=1,
+        format_func=lambda x: {
+            "1m": "1 Min (Scalping)",
+            "5m": "5 Min (Intraday)",
+            "15m": "15 Min (Trend)",
+            "1h": "1 Hour (Swing)",
+            "1d": "Daily (Positional)"
+        }.get(x, x),
+        key="global_timeframe"
+    )
+    
+    global_show_ema = st.toggle("9 EMA (गोल्डन लाइन) दिखाएं", value=True, key="global_show_ema")
+
+    st.divider()
+    st.subheader("🛡️ Risk & Kill Switch")
+    max_daily_loss = st.number_input("Max Daily Loss Limit (₹):", min_value=500.0, value=3000.0, step=500.0)
+    
+    if st.button("🔒 Logout", use_container_width=True):
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+# ================= 5. F&O Database =================
 FNO_DATABASE = {
     "NIFTY": {"sec_id": "13", "lot": 25, "sector": "इंडेक्स", "yf": "^NSEI"},
     "BANKNIFTY": {"sec_id": "25", "lot": 15, "sector": "इंडेक्स", "yf": "^NSEBANK"},
@@ -105,70 +217,52 @@ FNO_DATABASE = {
     "ITC": {"sec_id": "1660", "lot": 1600, "sector": "एफएमसीजी", "yf": "ITC.NS"},
     "HINDUNILVR": {"sec_id": "1394", "lot": 300, "sector": "एफएमसीजी", "yf": "HINDUNILVR.NS"},
     "LT": {"sec_id": "11483", "lot": 150, "sector": "इंफ्रा", "yf": "LT.NS"},
-    "ADANIENT": {"sec_id": "25", "lot": 300, "sector": "अडानी ग्रुप", "yf": "ADANIENT.NS"},
-    "ADANIPORTS": {"sec_id": "15083", "lot": 400, "sector": "अडानी ग्रुप", "yf": "ADANIPORTS.NS"},
-    "COALINDIA": {"sec_id": "20374", "lot": 2100, "sector": "मेटल/माइनिंग", "yf": "COALINDIA.NS"},
+    "ADANIENT": {"sec_id": "25", "lot": 300, "sector": "अडानी", "yf": "ADANIENT.NS"},
+    "ADANIPORTS": {"sec_id": "15083", "lot": 400, "sector": "अडानी", "yf": "ADANIPORTS.NS"},
+    "COALINDIA": {"sec_id": "20374", "lot": 2100, "sector": "माइनिंग", "yf": "COALINDIA.NS"},
     "NTPC": {"sec_id": "11630", "lot": 1500, "sector": "पावर", "yf": "NTPC.NS"},
     "POWERGRID": {"sec_id": "14977", "lot": 1800, "sector": "पावर", "yf": "POWERGRID.NS"},
-    "BHARTIARTL": {"sec_id": "10604", "lot": 475, "sector": "दूरसंचार", "yf": "BHARTIARTL.NS"}
+    "BHARTIARTL": {"sec_id": "10604", "lot": 475, "sector": "टेलीकॉम", "yf": "BHARTIARTL.NS"}
 }
 
 ALL_ASSETS = sorted(list(FNO_DATABASE.keys()))
 
-# ================= 4. Sidebar & Dhan Live Connectivity =================
-DEFAULT_DHAN_CLIENT_ID = "1101101919"
-
-with st.sidebar:
-    st.header("⚡ Dhan API Setup")
-    dhan_client_id = st.text_input("Dhan Client ID", value=st.session_state.get("dhan_client_id", DEFAULT_DHAN_CLIENT_ID))
-    dhan_token = st.text_input("Dhan Access Token", value=st.session_state.get("dhan_token", ""), type="password")
+# ================= 6. Universal Interactive Chart Engine =================
+def calculate_heikin_ashi(df):
+    ha_df = df.copy()
+    ha_df['HA_Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
     
-    dhan_instance = None
-    if dhan_client_id and dhan_token and DHAN_AVAILABLE:
-        clean_id = str(dhan_client_id).strip()
-        clean_tok = str(dhan_token).strip()
-        try:
-            if DhanContext is not None:
-                ctx = DhanContext(client_id=clean_id, access_token=clean_tok)
-                temp_dhan = dhanhq(ctx)
-            else:
-                try:
-                    temp_dhan = dhanhq(clean_id, clean_tok)
-                except TypeError:
-                    temp_dhan = dhanhq(client_id=clean_id, access_token=clean_tok)
-
-            test_resp = temp_dhan.get_fund_limits()
-            if isinstance(test_resp, dict) and test_resp.get("status") == "success":
-                dhan_instance = temp_dhan
-                st.session_state["dhan_client_id"] = clean_id
-                st.session_state["dhan_token"] = clean_tok
-                st.success("🟢 Dhan API Live Connected")
-            else:
-                dhan_instance = temp_dhan
-                st.success("🟢 Dhan API Connected")
-        except Exception as e:
-            st.error(f"Connection Exception: {str(e)}")
-            dhan_instance = None
-    else:
-        st.info("⚪ Market Watch Active (Offline Execution)")
-
-    st.divider()
-    st.subheader("🛡️ Risk & Kill Switch")
-    max_daily_loss = st.number_input("Max Daily Loss Limit (₹):", min_value=500.0, value=3000.0, step=500.0)
+    ha_open = [(df['Open'].iloc[0] + df['Close'].iloc[0]) / 2]
+    for i in range(1, len(df)):
+        ha_open.append((ha_open[i-1] + ha_df['HA_Close'].iloc[i-1]) / 2)
+    ha_df['HA_Open'] = ha_open
     
-    if st.button("🔒 Logout", use_container_width=True):
-        st.session_state["authenticated"] = False
-        st.rerun()
+    ha_df['HA_High'] = ha_df[['High', 'HA_Open', 'HA_Close']].max(axis=1)
+    ha_df['HA_Low'] = ha_df[['Low', 'HA_Open', 'HA_Close']].min(axis=1)
+    return ha_df
 
-# ================= 5. Chart Engine Helper (5-Min Candle + Zoom) =================
-def render_zoomable_chart(symbol, yf_ticker):
+def render_zoomable_chart(symbol, yf_ticker, timeframe_choice=None, candle_type_choice=None, show_ema_choice=None):
+    # ग्लोबल सेटिंग्स से मान लेना (यदि अलग से पास न किया गया हो)
+    tf = timeframe_choice if timeframe_choice else st.session_state.get("global_timeframe", "5m")
+    ctype = candle_type_choice if candle_type_choice else st.session_state.get("global_candle_type", "Regular Candlestick")
+    show_ema = show_ema_choice if show_ema_choice is not None else st.session_state.get("global_show_ema", True)
+
+    tf_params = {
+        "1m": {"period": "1d", "interval": "1m"},
+        "5m": {"period": "5d", "interval": "5m"},
+        "15m": {"period": "1mo", "interval": "15m"},
+        "1h": {"period": "1mo", "interval": "60m"},
+        "1d": {"period": "6mo", "interval": "1d"}
+    }
+    cfg = tf_params.get(tf, {"period": "5d", "interval": "5m"})
+
     try:
-        data = yf.download(yf_ticker, period="5d", interval="5m", progress=False)
+        data = yf.download(yf_ticker, period=cfg["period"], interval=cfg["interval"], progress=False)
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
             
         if data.empty or len(data) < 2:
-            st.warning("चार्ट डेटा लोड नहीं हो सका।")
+            st.info(f"{symbol}: चार्ट डेटा लोड हो रहा है...")
             return
 
         last_close = float(data['Close'].iloc[-1])
@@ -177,47 +271,72 @@ def render_zoomable_chart(symbol, yf_ticker):
         is_positive = pct_change >= 0
 
         border_class = "chart-box-green" if is_positive else "chart-box-red"
-        border_color = "#00E676" if is_positive else "#FF5252"
+        
+        # Heikin-Ashi या Normal कैंडल डेटा का चुनाव
+        is_ha = "Heikin" in ctype
+        if is_ha:
+            plot_df = calculate_heikin_ashi(data)
+            open_col, high_col, low_col, close_col = 'HA_Open', 'HA_High', 'HA_Low', 'HA_Close'
+            label_prefix = "Heikin-Ashi"
+        else:
+            plot_df = data
+            open_col, high_col, low_col, close_col = 'Open', 'High', 'Low', 'Close'
+            label_prefix = "Candles"
+
+        # 9 EMA गणना
+        plot_df['EMA9'] = plot_df['Close'].ewm(span=9, adjust=False).mean()
 
         fig = go.Figure()
+
+        # Candlestick Trace
         fig.add_trace(go.Candlestick(
-            x=data.index,
-            open=data['Open'],
-            high=data['High'],
-            low=data['Low'],
-            close=data['Close'],
+            x=plot_df.index,
+            open=plot_df[open_col],
+            high=plot_df[high_col],
+            low=plot_df[low_col],
+            close=plot_df[close_col],
             increasing_line_color='#00E676',
             decreasing_line_color='#FF5252',
-            name="5-Min"
+            name=f"{label_prefix} ({tf})"
         ))
 
+        # 9 EMA Trace
+        if show_ema:
+            fig.add_trace(go.Scatter(
+                x=plot_df.index,
+                y=plot_df['EMA9'],
+                mode='lines',
+                line=dict(color='#FFD700', width=1.8),
+                name='9 EMA'
+            ))
+
         fig.update_layout(
-            title=f"5-Min Chart: {symbol} ({'+' if is_positive else ''}{pct_change:.2f}%)",
+            title=f"{symbol} ({label_prefix} | {tf.upper()} | {'+' if is_positive else ''}{pct_change:.2f}%)",
             template="plotly_dark",
-            height=360,
+            height=370,
             margin=dict(l=10, r=10, t=35, b=10),
             xaxis_rangeslider_visible=False,
-            dragmode="zoom"
+            dragmode="zoom",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
 
         st.markdown(f'<div class="{border_class}">', unsafe_allow_html=True)
         st.plotly_chart(fig, use_container_width=True, config={"scrollZoom": True, "displayModeBar": True})
         st.markdown('</div>', unsafe_allow_html=True)
-    except Exception as e:
-        st.info("चार्ट लोड होने में समस्या आ रही है।")
+    except Exception:
+        st.info(f"{symbol}: चार्ट डेटा उपलब्ध नहीं है।")
 
-# ================= 6. DHAN ADVANCED TERMINAL & ORDER SYSTEM =================
+# ================= 7. Trading Terminal & Option Chain =================
 st.title("⚡ महादेब F&O प्रो-टर्मिनल")
 
 with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True):
     col_left, col_right = st.columns([1.1, 0.9])
 
     with col_left:
-        t_order, t_chain, t_pos = st.tabs(["🛒 Place Order", "📊 Live Option Chain", "📋 Positions & Kill-Switch"])
+        t_order, t_chain, t_pos = st.tabs(["🛒 Place Order", "📊 Live Option Chain", "📋 Positions"])
 
         with t_order:
-            # 1. Underlying Asset Selection (पूरे F&O स्टॉक्स)
-            selected_asset = st.selectbox("Underlying Asset (200+ F&O स्टॉक्स उपलब्ध):", ALL_ASSETS, index=0)
+            selected_asset = st.selectbox("Underlying Asset (F&O स्टॉक्स व इंडेक्स):", ALL_ASSETS, index=0)
             asset_info = FNO_DATABASE.get(selected_asset, {"lot": 1, "sec_id": "0", "yf": f"{selected_asset}.NS"})
             lot_size = asset_info["lot"]
 
@@ -227,7 +346,6 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
             with c_prod:
                 product_type = st.selectbox("Product", ["INTRADAY (MIS)", "NORMAL / CNC"])
 
-            # 2. Dynamic Quantity Logic (Lot vs Share)
             c_qty, c_side = st.columns(2)
             with c_qty:
                 if "FNO" in exchange_seg:
@@ -239,7 +357,7 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
                     st.caption(f"कुल शेयर: **{actual_units} Shares**")
 
             with c_side:
-                order_side = st.radio("Transaction Side", ["BUY", "SELL"], horizontal=True)
+                order_side = st.radio("Side", ["BUY", "SELL"], horizontal=True)
 
             c_otype, c_price = st.columns(2)
             with c_otype:
@@ -247,8 +365,7 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
             with c_price:
                 limit_price = st.number_input("Price (₹)", min_value=0.0, value=100.0, step=0.5)
 
-            # Auto SL and Target Attachment
-            attach_sl = st.checkbox("Auto SL-Limit & Trailing SL जोड़ें", value=True)
+            attach_sl = st.checkbox("Auto SL-Limit & Trailing जोड़ें", value=True)
             if attach_sl:
                 sl_1, sl_2 = st.columns(2)
                 with sl_1:
@@ -283,12 +400,10 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
                     except Exception as ex:
                         st.error(f"एरर: {str(ex)}")
 
-        # TAB 2: Live Option Chain
         with t_chain:
             st.subheader(f"Option Chain: {selected_asset}")
             if dhan_instance:
                 try:
-                    # Dhan Option Chain Fetch
                     chain_res = dhan_instance.get_option_chain(
                         underlying_scrip=int(asset_info["sec_id"]),
                         underlying_seg="IDX_I" if asset_info["sector"] == "इंडेक्स" else "NSE_EQ",
@@ -298,13 +413,12 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
                         df_oc = pd.DataFrame(chain_res["data"])
                         st.dataframe(df_oc, use_container_width=True, height=280)
                     else:
-                        st.info("लाइव ऑप्शन डेटा स्ट्राइक फेच हो रहा है। (DhanHQ FNO Session Ready)")
+                        st.info("ऑप्शन चेन लोड हो रही है (Dhan API Active)...")
                 except Exception:
-                    st.info("इस एसेट के लिए एक्सपायरी ऑप्शन चेन लोड की जा रही है...")
+                    st.info("एक्सपायरी ऑप्शन डेटा फ़ेच किया जा रहा है...")
             else:
-                st.info("लाइव ऑप्शन चेन देखने के लिए Dhan API कनेक्ट करें।")
+                st.info("लाइव ऑप्शन चेन के लिए टोकन दर्ज करें।")
 
-        # TAB 3: Positions & Kill Switch
         with t_pos:
             if dhan_instance:
                 try:
@@ -322,21 +436,21 @@ with st.expander("⚡ DHAN LIVE TRADING TERMINAL & OPTION CHAIN", expanded=True)
             else:
                 st.info("पोजीशन देखने के लिए Dhan कनेक्ट करें।")
 
-    # Right Column: Zoomable 5-Min Live Chart
+    # दायाँ कॉलम: लाइव चार्ट (ग्लोबल सेटिंग्स अनुसार)
     with col_right:
-        st.subheader("📊 लाइव 5-मिनट तकनीकी चार्ट (Zoom Enabled)")
+        st.subheader("📊 लाइव तकनीकी चार्ट")
         target_yf = FNO_DATABASE[selected_asset]["yf"]
         render_zoomable_chart(selected_asset, target_yf)
 
-# ================= 7. SECTOR & MARKET SCANNER WITH COLOR CHARTS =================
+# ================= 8. Multi-Sector & Stock Scanners (Sync with Global Settings) =================
 st.write("---")
-st.subheader("🏛️ सभी सेक्टर्स व स्टॉक्स लाइव रडार (रंग-बिरंगे चार्ट के साथ)")
+st.subheader("🏛️ सभी सेक्टर्स व स्टॉक्स लाइव रडार (ग्लोबल सेटिंग्स सिंक्ड)")
 
-tab_sec, tab_fno_scan = st.tabs(["🏛️ सभी सेक्टर्स व इंडेक्स", "⭐ टॉप F&O स्टॉक्स स्कैनर"])
+tab_sec, tab_fno_scan = st.tabs(["🏛️ मुख्य इंडेक्स व सेक्टर्स", "⭐ टॉप F&O स्टॉक्स"])
 
 with tab_sec:
     if st.button("🔄 सभी सेक्टर्स स्कैन करें", use_container_width=True):
-        sec_items = list(FNO_DATABASE.items())[:6]  # मुख्य इंडेक्स
+        sec_items = list(FNO_DATABASE.items())[:6]
         for sym, meta in sec_items:
             c_info, c_chart = st.columns([1, 1.5])
             with c_info:
@@ -347,7 +461,7 @@ with tab_sec:
             st.divider()
 
 with tab_fno_scan:
-    if st.button("🔥 टॉप मोमेंटम स्टॉक्स स्कैन करें", use_container_width=True):
+    if st.button("🔥 टॉप मोमेंटम स्टॉक्स लोड करें", use_container_width=True):
         top_stocks = ["HDFCBANK", "RELIANCE", "TATASTEEL", "TATAMOTORS", "BAJFINANCE"]
         for stk in top_stocks:
             meta = FNO_DATABASE[stk]
