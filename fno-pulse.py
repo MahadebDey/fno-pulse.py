@@ -47,14 +47,14 @@ st.markdown("""
     .chart-box-green {
         border: 2px solid #00E676 !important;
         border-radius: 8px !important;
-        padding: 6px !important;
+        padding: 4px !important;
         background-color: rgba(0, 230, 118, 0.03);
         margin-top: 6px;
     }
     .chart-box-red {
         border: 2px solid #FF5252 !important;
         border-radius: 8px !important;
-        padding: 6px !important;
+        padding: 4px !important;
         background-color: rgba(255, 82, 82, 0.03);
         margin-top: 6px;
     }
@@ -84,7 +84,7 @@ if not st.session_state["authenticated"]:
                 st.error("गलत पिन! कृपया पुनः प्रयास करें।")
     st.stop()
 
-# ================= 3. Session State & Token Cache =================
+# ================= 3. Session State Initialization =================
 if "chart_tf" not in st.session_state:
     st.session_state["chart_tf"] = "5m"
 if "chart_type" not in st.session_state:
@@ -98,6 +98,7 @@ if "sector_scan_data" not in st.session_state:
 if "top5_scan_data" not in st.session_state:
     st.session_state["top5_scan_data"] = None
 
+# ================= 4. Permanent Token Cache Functions =================
 TOKEN_CACHE_FILE = ".dhan_token_cache.json"
 
 def load_cached_credentials():
@@ -127,7 +128,7 @@ cached_creds = load_cached_credentials()
 default_client_id = cached_creds.get("client_id", "1101101919")
 default_token = cached_creds.get("token", "")
 
-# ================= 4. Sidebar Setup & Live Ticks =================
+# ================= 5. Sidebar Setup =================
 with st.sidebar:
     st.header("⚡ Dhan API Setup")
     dhan_client_id = st.text_input("Dhan Client ID", value=default_client_id)
@@ -171,10 +172,10 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.header("⏱️ लाइव ऑटो-रिफ्रेश")
+    st.header("⏱️ ऑटो-रिफ्रेश (Auto-Refresh)")
     auto_refresh_on = st.toggle("मार्केट टिक्स ऑटो-रिफ्रेश चालू करें", value=False)
     if auto_refresh_on:
-        refresh_interval = st.selectbox("रिफ्रेश टाइम:", [5, 10, 15, 30], index=1, format_func=lambda x: f"{x} सेकंड")
+        refresh_interval = st.selectbox("रिफ्रेश टाइम:", [10, 15, 30, 60], index=1, format_func=lambda x: f"{x} सेकंड")
         if AUTOREFRESH_AVAILABLE:
             st_autorefresh(interval=refresh_interval * 1000, key="live_market_tick")
 
@@ -200,7 +201,7 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# ================= 5. COMPLETE 200+ F&O DATABASE =================
+# ================= 6. COMPLETE 200+ F&O DATABASE =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 FNO_RAW_MAP = {
@@ -303,7 +304,6 @@ FNO_DATABASE = {
     "MIDCPNIFTY": {"sec_id": "28", "lot": 50, "sector": "इंडेक्स", "step": 25, "yf": "^NSEMDCP50", "seg": "IDX_I"}
 }
 
-# 200+ F&O स्टॉक्स को डेटाबेस में लोड करना
 for sym, info in FNO_RAW_MAP.items():
     FNO_DATABASE[sym] = {
         "sec_id": "0",
@@ -333,7 +333,7 @@ ALL_SECTOR_INDICES = {
     "निफ्टी इंफ्रा (Infra)": "^CNXINFRA"
 }
 
-# ================= 6. Research Engine =================
+# ================= 7. Granular Scoring & Research Functions =================
 def fetch_rss_feed(query, limit=10):
     url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
     results = []
@@ -356,20 +356,21 @@ def fetch_rss_feed(query, limit=10):
     return results
 
 def fetch_twitter_pulse(symbol):
-    feed = fetch_rss_feed(f"{symbol}+share+(Twitter+OR+X+OR+breakout+OR+target)", limit=3)
+    feed = fetch_rss_feed(f"{symbol}+share+(Twitter+OR+X+OR+breakout+OR+target)", limit=4)
     if not feed:
-        return "⚪ सामान्य (Neutral)", 0.0
+        return "⚪ न्यूट्रल", 0.0
     text_blob = " ".join([item['title'].lower() for item in feed])
-    bullish_keywords = ["buy", "breakout", "target", "bullish", "rally", "surge", "calls"]
-    bearish_keywords = ["sell", "fall", "drop", "bearish", "crash", "loss", "puts"]
+    bullish_keywords = ["buy", "breakout", "target", "bullish", "rally", "surge", "calls", "upgrade", "multibagger"]
+    bearish_keywords = ["sell", "fall", "drop", "bearish", "crash", "loss", "puts", "downgrade", "breakdown"]
     
-    b_score = sum(1 for kw in bullish_keywords if kw in text_blob)
-    be_score = sum(1 for kw in bearish_keywords if kw in text_blob)
+    b_score = sum(1.2 for kw in bullish_keywords if kw in text_blob)
+    be_score = sum(1.2 for kw in bearish_keywords if kw in text_blob)
     
-    if b_score > be_score:
-        return "🟢 बुलिश पल्स (Twitter)", 1.5
-    elif be_score > b_score:
-        return "🔴 बेयरिश पल्स (Twitter)", -1.5
+    net_tw = round(b_score - be_score, 2)
+    if net_tw > 1.0:
+        return f"🟢 बुलिश (+{net_tw})", net_tw
+    elif net_tw < -1.0:
+        return f"🔴 बेयरिश ({net_tw})", net_tw
     return "⚪ न्यूट्रल", 0.0
 
 def scan_sector_item(item):
@@ -386,19 +387,17 @@ def scan_sector_item(item):
         pdh = round(float(data['High'].iloc[-2]), 2)
         pdl = round(float(data['Low'].iloc[-2]), 2)
         
-        score = 0
-        if chg_pct > 0: score += 1
-        if cmp_val > ema20: score += 1
-        if cmp_val > pdh: score += 1
-        if chg_pct < 0: score -= 1
-        if cmp_val < ema20: score -= 1
-        if cmp_val < pdl: score -= 1
+        score = 0.0
+        score += round(chg_pct * 1.5, 2)
+        if cmp_val > ema20: score += 1.5
+        else: score -= 1.5
+        if cmp_val > pdh: score += 2.0
+        elif cmp_val < pdl: score -= 2.0
 
-        if score >= 2: status = "🟢 मजबूत तेजी (Super Bullish)"
-        elif score == 1: status = "🟢 हल्की तेजी (Mild Bullish)"
-        elif score <= -2: status = "🔴 भारी मंदी (Super Bearish)"
-        elif score == -1: status = "🔴 हल्की मंदी (Mild Bearish)"
-        else: status = "⚪ साइडवेज़"
+        if score >= 2.5: status = "🟢 मजबूत तेजी (Super Bullish)"
+        elif score > 0: status = "🟢 हल्की तेजी (Mild Bullish)"
+        elif score <= -2.5: status = "🔴 भारी मंदी (Super Bearish)"
+        else: status = "🔴 हल्की मंदी (Mild Bearish)"
 
         return {
             "इंडेक्स / सेक्टर": name, "मौजूदा भाव (CMP)": cmp_val, "बदलाव (%)": f"{'+' if chg_pct > 0 else ''}{chg_pct}%",
@@ -409,7 +408,6 @@ def scan_sector_item(item):
 
 def analyze_stock_full(symbol):
     ticker = f"{symbol}.NS"
-    score = 0.0
     meta = FNO_RAW_MAP.get(symbol, {"sec": "अन्य"})
     details = {
         "शेयर": symbol, "सेक्टर": meta["sec"], "भाव (₹)": 0.0,
@@ -422,30 +420,49 @@ def analyze_stock_full(symbol):
             
         if len(daily) >= 20:
             cmp_val = round(float(daily['Close'].iloc[-1]), 2)
+            prev_close = round(float(daily['Close'].iloc[-2]), 2)
             pdh = round(float(daily['High'].iloc[-2]), 2)
             pdl = round(float(daily['Low'].iloc[-2]), 2)
             ema20 = round(float(daily['Close'].ewm(span=20, adjust=False).mean().iloc[-1]), 2)
             details["भाव (₹)"] = cmp_val
 
-            tech_points = 0.0
-            if cmp_val > pdh: tech_points += 2.0
-            elif cmp_val < pdl: tech_points -= 2.0
-            if cmp_val >= ema20: tech_points += 1.0
-            else: tech_points -= 1.0
+            day_change_pct = ((cmp_val - prev_close) / prev_close) * 100.0
+            score = round(day_change_pct * 1.5, 2)
 
-            score += tech_points
-            details["तकनीकी रुझान"] = "🟢 मजबूत" if tech_points > 1.0 else ("🔴 कमजोर" if tech_points < -1.0 else "⚪ न्यूट्रल")
+            # PDH / PDL Breakout Strength
+            if cmp_val > pdh:
+                breakout_pct = ((cmp_val - pdh) / pdh) * 100.0
+                score += round(2.0 + (breakout_pct * 1.2), 2)
+            elif cmp_val < pdl:
+                breakdown_pct = ((pdl - cmp_val) / pdl) * 100.0
+                score -= round(2.0 + (breakdown_pct * 1.2), 2)
 
+            # EMA 20 Distance
+            ema_dist = ((cmp_val - ema20) / ema20) * 100.0
+            score += round(np.clip(ema_dist * 0.8, -3.0, 3.0), 2)
+
+            # RSI 14 (Relative Strength Index)
+            delta = daily['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            rs = gain / (loss + 1e-9)
+            rsi = 100 - (100 / (1 + rs)).iloc[-1]
+            if rsi > 60: score += round((rsi - 60) * 0.15, 2)
+            elif rsi < 40: score -= round((40 - rsi) * 0.15, 2)
+
+            # Twitter Pulse Additive
             tw_status, tw_pts = fetch_twitter_pulse(symbol)
             score += tw_pts
             details["ट्विटर पल्स"] = tw_status
 
-        details["कुल स्कोर"] = round(score, 2)
+            details["तकनीकी रुझान"] = "🟢 मजबूत" if score > 1.5 else ("🔴 कमजोर" if score < -1.5 else "⚪ न्यूट्रल")
+            details["कुल स्कोर"] = round(score, 2)
+
         return details
     except Exception:
         return None
 
-# ================= 7. Option Strike Generator =================
+# ================= 8. Option Strike Generator =================
 def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
     atm = round(cmp_val / step) * step
     strikes = []
@@ -453,7 +470,7 @@ def generate_dynamic_strikes(cmp_val, step, num_strikes=7):
         strikes.append(int(atm + (i * step)))
     return strikes, atm
 
-# ================= 8. Chart Engine (Smooth Mobile Pinch-Zoom) =================
+# ================= 9. Chart Engine (Anti-Flicker Mobile Optimization) =================
 def compute_heikin_ashi(df):
     ha = pd.DataFrame(index=df.index)
     ha['Close'] = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4.0
@@ -534,6 +551,7 @@ def render_zoomable_chart(symbol, yf_ticker):
                 name='9 EMA'
             ))
 
+        # मोबाइल पर टच फ़्लिकर रोकने के लिए स्थिर पैन और ज़ूम सेटिंग्स
         fig.update_layout(
             title=dict(
                 text=f"<b>{symbol}</b> | {label_name} ({tf.upper()}) | {'+' if is_positive else ''}{pct_change:.2f}%",
@@ -546,6 +564,7 @@ def render_zoomable_chart(symbol, yf_ticker):
             margin=dict(l=10, r=10, t=30, b=30),
             xaxis_rangeslider_visible=False,
             dragmode="pan",
+            hovermode="x unified",
             legend=dict(orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5)
         )
 
@@ -561,13 +580,18 @@ def render_zoomable_chart(symbol, yf_ticker):
         st.plotly_chart(
             fig,
             use_container_width=True,
-            config={"scrollZoom": True, "displayModeBar": False, "doubleClick": "reset"}
+            config={
+                "scrollZoom": False,
+                "displayModeBar": False,
+                "doubleClick": "reset",
+                "showTips": False
+            }
         )
         st.markdown('</div>', unsafe_allow_html=True)
     except Exception:
         st.info(f"{symbol}: लाइव डेटा उपलब्ध नहीं है।")
 
-# ================= 9. ADVANCED OPTIONS TRADING TERMINAL =================
+# ================= 10. ADVANCED OPTIONS TRADING TERMINAL =================
 st.title("⚡ महादेब F&O प्रो-टर्मिनल")
 
 target_asset = st.session_state.get("selected_fno_asset", "NIFTY")
@@ -594,7 +618,7 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
                     st.session_state["selected_fno_asset"] = st.session_state["asset_select_key"]
                 
                 selected_asset = st.selectbox(
-                    f"Underlying Asset ({len(ALL_ASSETS)} F&O स्टॉक्स व इंडेक्स उपलब्ध):",
+                    f"Underlying Asset ({len(ALL_ASSETS)} F&O स्टॉक्स उपलब्ध):",
                     ALL_ASSETS,
                     index=ALL_ASSETS.index(target_asset),
                     key="asset_select_key",
@@ -762,7 +786,7 @@ with st.expander("⚡ DHAN LIVE OPTIONS EXECUTION TERMINAL & OPTION CHAIN", expa
 
         render_zoomable_chart(target_asset, meta_info["yf"])
 
-# ================= 10. COMPLETE 6-PART MARKET RESEARCH INTERFACE =================
+# ================= 11. COMPLETE 6-PART MARKET RESEARCH INTERFACE =================
 st.write("---")
 st.subheader("🔍 संपूर्ण मार्केट रिसर्च व इंटेलिजेंस हब (6 भाग)")
 
@@ -782,12 +806,12 @@ with st.expander("🏛️ भाग 1: सभी सेक्टर्स व �
     if st.session_state.get("sector_scan_data") is not None:
         st.dataframe(st.session_state["sector_scan_data"], use_container_width=True, hide_index=True)
 
-# भाग 2: मल्टी-फैक्टर टॉप 5 बुलिश और बेयरिश शेयर (Session State Locked)
-with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेयरिश शेयर (Twitter/X + VWAP + 20 EMA)", expanded=False):
-    st.write("**Twitter/X पल्स + तकनीकी आंकड़े (VWAP, PDH/PDL, 20 EMA) + कॉर्पोरेट खबरों के आधार पर टॉप 5:**")
-    scan_limit = st.slider("स्कैन करने के लिए F&O शेयरों की संख्या:", min_value=10, max_value=len(ALL_FNO_STOCKS), value=20, step=5)
+# भाग 2: मल्टी-फैक्टर टॉप 5 बुलिश और बेयरिश शेयर (Granular Ranked Scores)
+with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेयरिश शेयर (Twitter/X + VWAP + 20 EMA + RSI)", expanded=False):
+    st.write("**वास्तविक मोमेंटम रैंकिंग: सबसे ज्यादा मजबूत बुलिश और सबसे ज्यादा कमजोर बेयरिश शेयर ऊपर दिखेंगे:**")
+    scan_limit = st.slider("स्कैन करने के लिए F&O शेयरों की संख्या:", min_value=10, max_value=len(ALL_FNO_STOCKS), value=25, step=5)
     if st.button("🔥 मल्टी-फैक्टर मार्केट व Twitter पल्स स्कैन शुरू करें", use_container_width=True, key="btn_deep_analysis"):
-        with st.spinner(f"{scan_limit} F&O शेयरों का गहन विश्लेषण व Twitter पल्स स्कैन चल रहा है..."):
+        with st.spinner(f"{scan_limit} F&O शेयरों की गहन मोमेंटम रैंकिंग चल रही है..."):
             stock_sublist = ALL_FNO_STOCKS[:scan_limit]
             analysis_data = []
             with ThreadPoolExecutor(max_workers=8) as executor:
@@ -796,6 +820,7 @@ with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेय�
                     if itm and itm["भाव (₹)"] > 0: analysis_data.append(itm)
             if analysis_data:
                 mdf = pd.DataFrame(analysis_data)
+                # सटीक स्कोर के आधार पर रैंकिंग
                 sorted_df = mdf.sort_values(by="कुल स्कोर", ascending=False)
                 st.session_state["top5_scan_data"] = sorted_df
 
@@ -803,10 +828,10 @@ with st.expander("⭐ भाग 2: टॉप 5 बुलिश और बेय�
         sorted_df = st.session_state["top5_scan_data"]
         col_a, col_b = st.columns(2)
         with col_a:
-            st.success("🟢 **शीर्ष बुलिश शेयर (Twitter + Tech)**")
+            st.success("🟢 **शीर्ष बुलिश शेयर (सर्वाधिक तेजी वाले पहले)**")
             st.dataframe(sorted_df.head(5)[["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "ट्विटर पल्स", "कुल स्कोर"]], use_container_width=True, hide_index=True)
         with col_b:
-            st.error("🔴 **शीर्ष बेयरिश शेयर (Twitter + Tech)**")
+            st.error("🔴 **शीर्ष बेयरिश शेयर (सर्वाधिक मंदी वाले पहले)**")
             st.dataframe(sorted_df.tail(5).iloc[::-1][["शेयर", "सेक्टर", "भाव (₹)", "तकनीकी रुझान", "ट्विटर पल्स", "कुल स्कोर"]], use_container_width=True, hide_index=True)
 
 # भाग 3: तिमाही कॉर्पोरेट नतीजे व वर्डिक्ट
@@ -846,7 +871,7 @@ with st.expander("📺 भाग 5: ज़ी बिज़नेस व सी�
                     st.markdown(f"**[{src}]** `{t['stock']}` | [{t['title']}]({t['link']})")
                     st.divider()
 
-# भाग 6: ब्रोकरेज हाउसेस के टारगेट्स
+# भाग 6: बड़े ब्रोकरेज हाउसेस के टारगेट्स
 with st.expander("🎯 भाग 6: बड़े ब्रोकरेज हाउसेस के टारगेट प्राइस (Brokerage Upgrades/Downgrades)", expanded=False):
     if st.button("🔄 ब्रोकरेज टारगेट्स लोड करें", use_container_width=True, key="btn_brok"):
         with st.spinner("ब्रोकरेज रिपोर्ट्स फेच हो रही हैं..."):
